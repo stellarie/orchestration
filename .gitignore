@@ -1,0 +1,26 @@
+# environment & secrets
+.env
+.env.*
+!.env.example
+
+# runtime logs
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# blackboard (pipeline runtime state — not source)
+.blackboard/
+
+# session & memory cache
+.sessions/
+agent-memory/
+
+# OS
+.DS_Store
+Thumbs.db
