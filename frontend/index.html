@@ -413,37 +413,40 @@ function StreamEntry({ entry }) {
 // ── ComposeBar ───────────────────────────────────────────────────────────────
 
 function ComposeBar({ agents, agentOrder }) {
-  const activeAgents = agentOrder.filter(n => agents[n]?.status === 'in_progress');
-  const [target, setTarget] = useState('');
-  const [text,   setText]   = useState('');
-  const [busy,   setBusy]   = useState(false);
+  const [target,  setTarget]  = useState('');
+  const [text,    setText]    = useState('');
+  const [busy,    setBusy]    = useState(false);
+  const [feedback, setFeedback] = useState('');  // 'live' | 'pending' | ''
 
-  // Auto-select first active agent
+  // Auto-select first agent when list populates
   useEffect(() => {
-    if (activeAgents.length && !activeAgents.includes(target)) {
-      setTarget(activeAgents[0]);
-    }
-    if (!activeAgents.length) setTarget('');
-  }, [activeAgents.join(',')]);
+    if (agentOrder.length && !target) setTarget(agentOrder[0]);
+  }, [agentOrder.length]);
 
   const canSend = !!target && !!text.trim() && !busy;
 
   const send = async () => {
     if (!canSend) return;
     setBusy(true);
+    setFeedback('');
     try {
-      await fetch(`${API}/agent/prompt`, {
+      const r = await fetch(`${API}/agent/prompt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent: target, message: text.trim() }),
       });
+      const d = await r.json();
       setText('');
+      setFeedback(d.live ? 'live' : 'pending');
+      setTimeout(() => setFeedback(''), 3000);
     } finally {
       setBusy(false);
     }
   };
 
   const onKey = (e) => { if (e.key === 'Enter') send(); };
+
+  const isLive = agents[target]?.status === 'in_progress';
 
   return html`
     <div class="compose-bar">
@@ -452,21 +455,27 @@ function ComposeBar({ agents, agentOrder }) {
         class="compose-select"
         value=${target}
         onChange=${e => setTarget(e.target.value)}
-        disabled=${!activeAgents.length}
+        disabled=${!agentOrder.length}
       >
-        ${!activeAgents.length && html`<option value="">— no agents running —</option>`}
-        ${activeAgents.map(n => html`<option key=${n} value=${n}>${n}</option>`)}
+        ${!agentOrder.length && html`<option value="">— no agents —</option>`}
+        ${agentOrder.map(n => {
+          const s = agents[n]?.status;
+          const label = s === 'in_progress' ? `${n} ●` : n;
+          return html`<option key=${n} value=${n}>${label}</option>`;
+        })}
       </select>
       <input
         class="compose-input"
         type="text"
-        placeholder=${activeAgents.length ? `Message ${target || '…'}` : 'No agents running'}
+        placeholder=${target ? (isLive ? `Message ${target} now…` : `Queue for ${target}…`) : 'Select an agent'}
         value=${text}
         onInput=${e => setText(e.target.value)}
         onKeyDown=${onKey}
-        disabled=${!activeAgents.length}
+        disabled=${!agentOrder.length}
       />
-      <button class="compose-send" onClick=${send} disabled=${!canSend}>Send</button>
+      <button class="compose-send" onClick=${send} disabled=${!canSend}>
+        ${busy ? '…' : feedback === 'live' ? 'sent ✓' : feedback === 'pending' ? 'queued ✓' : 'Send'}
+      </button>
     </div>
   `;
 }

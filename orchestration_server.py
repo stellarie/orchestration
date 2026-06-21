@@ -309,8 +309,8 @@ def agent_prompt(req: AgentPromptRequest):
     """Inject a user message into a running agent's conversation mid-loop."""
     if req.agent not in AGENT_MAP:
         raise HTTPException(400, f"Unknown agent '{req.agent}'")
-    queued = interrupt_bus.send(req.agent, req.message)
-    return {"agent": req.agent, "queued": queued}
+    result = interrupt_bus.send(req.agent, req.message)
+    return {"agent": req.agent, **result}
 
 
 @app.get("/agent/active")

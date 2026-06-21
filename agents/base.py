@@ -115,8 +115,7 @@ class BaseAgent:
         resume_session: bool = False,
         output_suffix:  str  = "",
     ) -> dict:
-        self._interrupt_q = _queue.Queue()
-        interrupt_bus.register(self.NAME, self._interrupt_q)
+        self._interrupt_q = interrupt_bus.register(self.NAME)
         self._emit("agent_start")
         try:
             episodic = self.memory.read(self.NAME)
