@@ -118,6 +118,24 @@ class BaseAgent:
         self._interrupt_q = interrupt_bus.register(self.NAME)
         self._emit("agent_start")
         try:
+            # Drain messages queued before this run started and prepend them
+            # to the instruction so the agent addresses them first.
+            pending = []
+            while True:
+                try:
+                    pending.append(self._interrupt_q.get_nowait())
+                except _queue.Empty:
+                    break
+            for msg in pending:
+                self._emit("user_interrupt", msg)
+
+            if pending:
+                block = "\n\n".join(f"<user_message>\n{m}\n</user_message>" for m in pending)
+                instruction = (
+                    f"Before proceeding with your pipeline task, address these messages "
+                    f"from the user:\n\n{block}\n\n---\n\n{instruction}"
+                )
+
             episodic = self.memory.read(self.NAME)
             system   = self._build_system(episodic, output_suffix, instruction)
             messages = self.session.load(self.NAME) if resume_session else []
