@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orchestration</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --dim:       #8b949e;
+      --green:     #3fb950;
+      --blue:      #388bfd;
+      --yellow:    #d29922;
+      --red:       #f85149;
+      --purple:    #bc8cff;
+      --orange:    #ffa657;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); }
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 14px; overflow: hidden; }
+
+    /* ── layout ── */
+    .root { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+
+    .header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .header-title { font-weight: 600; font-size: 15px; letter-spacing: -.2px; color: var(--text); white-space: nowrap; }
+    .header-title span { color: var(--blue); }
+    .header-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+    .repo-input {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 5px 10px; border-radius: 6px;
+      font-size: 12px; font-family: 'Consolas', monospace;
+      outline: none; min-width: 0;
+    }
+    .repo-input:focus { border-color: var(--blue); }
+    .repo-input::placeholder { color: var(--dim); }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0; transition: background .3s;
+    }
+    .dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.off { background: var(--dim); }
+
+    .body { display: grid; grid-template-columns: 260px 1fr; overflow: hidden; }
+
+    /* ── agent list ── */
+    .agent-panel {
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .panel-heading {
+      padding: 10px 14px 8px;
+      font-size: 11px; font-weight: 600; letter-spacing: .8px;
+      color: var(--dim); text-transform: uppercase;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .agent-list { overflow-y: auto; flex: 1; padding: 6px 0; }
+    .agent-list::-webkit-scrollbar { width: 4px; }
+    .agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .agent-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 14px; cursor: pointer;
+      border-left: 2px solid transparent;
+      transition: background .15s, border-color .15s;
+    }
+    .agent-card:hover { background: var(--surface2); }
+    .agent-card.selected { background: var(--surface2); border-left-color: var(--blue); }
+
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.idle        { background: var(--border); }
+    .status-dot.queued      { background: var(--dim); }
+    .status-dot.in_progress { background: var(--blue); animation: pulse 1.2s ease-in-out infinite; }
+    .status-dot.done        { background: var(--green); }
+    .status-dot.failed      { background: var(--red); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .agent-info { flex: 1; min-width: 0; }
+    .agent-name { font-size: 13px; font-weight: 500; }
+    .agent-sub  { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+    .status-badge {
+      font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 10px;
+      flex-shrink: 0; text-transform: uppercase; letter-spacing: .4px;
+    }
+    .badge-idle        { background: var(--surface2); color: var(--dim); }
+    .badge-queued      { background: var(--surface2); color: var(--dim); }
+    .badge-in_progress { background: rgba(56,139,253,.15); color: var(--blue); }
+    .badge-done        { background: rgba(63,185,80,.15);  color: var(--green); }
+    .badge-failed      { background: rgba(248,81,73,.15);  color: var(--red); }
+
+    .empty-agents {
+      padding: 32px 14px; text-align: center; color: var(--dim); font-size: 12px; line-height: 1.6;
+    }
+
+    /* ── right panel ── */
+    .right-panel { display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── thinking stream ── */
+    .stream-panel {
+      flex: 1; overflow-y: auto; padding: 12px 16px;
+      font-family: 'Consolas', 'Monaco', monospace; font-size: 12.5px; line-height: 1.6;
+      min-height: 0;
+    }
+    .stream-panel::-webkit-scrollbar { width: 4px; }
+    .stream-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .stream-empty {
+      height: 100%; display: flex; align-items: center; justify-content: center;
+      color: var(--dim); font-family: 'Segoe UI', sans-serif; font-size: 13px;
+    }
+
+    .entry { margin-bottom: 6px; }
+
+    .entry-separator {
+      color: var(--dim); font-size: 11px; padding: 6px 0 4px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .entry-separator::before, .entry-separator::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    .entry-thinking .thinking-header {
+      color: var(--dim); font-size: 11px; margin-bottom: 3px;
+    }
+    .entry-thinking .thinking-body {
+      color: var(--text); white-space: pre-wrap; word-break: break-word;
+    }
+
+    .entry-tool {
+      color: var(--purple); padding: 1px 0;
+    }
+    .entry-tool .ts { color: var(--dim); font-size: 11px; margin-right: 6px; }
+    .entry-tool .agent-tag { color: var(--dim); margin-right: 4px; }
+
+    .entry-done   { color: var(--green); font-size: 11px; padding: 2px 0; }
+    .entry-failed { color: var(--red);   font-size: 11px; padding: 2px 0; }
+
+    /* ── output drawer ── */
+    .drawer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      height: 280px; flex-shrink: 0;
+    }
+    .drawer-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .drawer-title { font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; flex: 1; }
+    .file-select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 3px 8px; border-radius: 5px; font-size: 12px;
+      font-family: 'Consolas', monospace; outline: none; flex: 1; max-width: 320px;
+    }
+    .file-select:focus { border-color: var(--blue); }
+    .drawer-close {
+      background: none; border: none; color: var(--dim); cursor: pointer;
+      font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1;
+    }
+    .drawer-close:hover { background: var(--surface2); color: var(--text); }
+    .drawer-body {
+      flex: 1; overflow-y: auto; padding: 10px 14px;
+      font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.65;
+      white-space: pre-wrap; word-break: break-word; color: var(--text);
+    }
+    .drawer-body::-webkit-scrollbar { width: 4px; }
+    .drawer-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .drawer-placeholder { color: var(--dim); font-family: 'Segoe UI', sans-serif; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { h, render }                              from 'https://esm.sh/preact@10.23.2';
+import { useState, useEffect, useRef, useCallback } from 'https://esm.sh/preact@10.23.2/hooks';
+import htm                                         from 'https://esm.sh/htm@3.1.1';
+
+const html = htm.bind(h);
+const MAX_STREAM = 600;
+const API = '';  // same origin
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toTimeString().slice(0, 8);
+}
+
+function badgeClass(status) { return `status-badge badge-${status ?? 'idle'}`; }
+function dotClass(status)   { return `status-dot ${status ?? 'idle'}`; }
+
+const LABEL = { idle: 'idle', queued: 'queued', in_progress: 'running', done: 'done', failed: 'failed' };
+
+// ── AgentCard ───────────────────────────────────────────────────────────────
+
+function AgentCard({ name, status, currentTool, selected, onClick }) {
+  return html`
+    <div class=${`agent-card${selected ? ' selected' : ''}`} onClick=${onClick}>
+      <div class=${dotClass(status)}></div>
+      <div class="agent-info">
+        <div class="agent-name">${name}</div>
+        ${currentTool && html`<div class="agent-sub">→ ${currentTool}</div>`}
+      </div>
+      <div class=${badgeClass(status)}>${LABEL[status] ?? status}</div>
+    </div>
+  `;
+}
+
+// ── StreamEntry ─────────────────────────────────────────────────────────────
+
+function StreamEntry({ entry }) {
+  const { type, agent, data, ts } = entry;
+
+  if (type === 'agent_start') return html`
+    <div class="entry entry-separator">${fmtTime(ts)} [${agent}] started</div>
+  `;
+
+  if (type === 'agent_done') return html`
+    <div class="entry entry-done">✓ ${fmtTime(ts)} [${agent}] done</div>
+  `;
+
+  if (type === 'agent_failed') return html`
+    <div class="entry entry-failed">✗ ${fmtTime(ts)} [${agent}] failed</div>
+  `;
+
+  if (type === 'tool_call') return html`
+    <div class="entry entry-tool">
+      <span class="ts">${fmtTime(ts)}</span>
+      <span class="agent-tag">[${agent}]</span>→ ${data}
+    </div>
+  `;
+
+  if (type === 'thinking') return html`
+    <div class="entry entry-thinking">
+      <div class="thinking-header">${fmtTime(ts)} [${agent}]</div>
+      <div class="thinking-body">${data}</div>
+    </div>
+  `;
+
+  return null;
+}
+
+// ── OutputDrawer ────────────────────────────────────────────────────────────
+
+function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
+  const [selectedFile, setSelectedFile] = useState('');
+  const [content, setContent]           = useState('');
+  const [loading, setLoading]           = useState(false);
+
+  // Auto-select first file that loosely matches the agent name
+  useEffect(() => {
+    if (!files.length) { setSelectedFile(''); setContent(''); return; }
+    const match = files.find(f => f.includes(selectedAgent)) ?? files[0];
+    setSelectedFile(match);
+  }, [selectedAgent, files]);
+
+  useEffect(() => {
+    if (!selectedFile || !repoPath) return;
+    setLoading(true);
+    fetch(`${API}/blackboard?repo_path=${encodeURIComponent(repoPath)}&filename=${encodeURIComponent(selectedFile)}`)
+      .then(r => r.json())
+      .then(d => { setContent(d.content ?? ''); setLoading(false); })
+      .catch(() => { setContent('(error loading file)'); setLoading(false); });
+  }, [selectedFile, repoPath]);
+
+  return html`
+    <div class="drawer">
+      <div class="drawer-header">
+        <div class="drawer-title">${selectedAgent}</div>
+        <select
+          class="file-select"
+          value=${selectedFile}
+          onChange=${e => setSelectedFile(e.target.value)}
+        >
+          ${files.map(f => html`<option key=${f} value=${f}>${f}</option>`)}
+        </select>
+        <button class="drawer-close" onClick=${onClose}>×</button>
+      </div>
+      <div class="drawer-body">
+        ${loading
+          ? html`<span class="drawer-placeholder">Loading…</span>`
+          : content
+            ? content
+            : html`<span class="drawer-placeholder">No content.</span>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+// ── App ─────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [repoPath, setRepoPath]         = useState(() => localStorage.getItem('repoPath') ?? '');
+  const [connected, setConnected]       = useState(false);
+  const [agents, setAgents]             = useState({});      // name → {status, currentTool}
+  const [agentOrder, setAgentOrder]     = useState([]);      // insertion order
+  const [stream, setStream]             = useState([]);      // log entries
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [outputFiles, setOutputFiles]   = useState([]);
+
+  const streamRef  = useRef(null);
+  const esRef      = useRef(null);
+  const entryId    = useRef(0);
+
+  // Persist repo path
+  useEffect(() => { localStorage.setItem('repoPath', repoPath); }, [repoPath]);
+
+  // Auto-scroll stream
+  useEffect(() => {
+    if (streamRef.current) {
+      const el = streamRef.current;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  }, [stream]);
+
+  // SSE connection
+  const connect = useCallback((path) => {
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    if (!path) { setConnected(false); return; }
+
+    const es = new EventSource(`${API}/stream?repo_path=${encodeURIComponent(path)}`);
+    esRef.current = es;
+
+    es.onopen    = () => setConnected(true);
+    es.onerror   = () => setConnected(false);
+    es.onmessage = (e) => {
+      let event;
+      try { event = JSON.parse(e.data); } catch { return; }
+      const { type, agent } = event;
+
+      // Update agent state
+      if (type === 'agent_start') {
+        setAgents(prev => ({ ...prev, [agent]: { status: 'in_progress', currentTool: null } }));
+        setAgentOrder(prev => prev.includes(agent) ? prev : [...prev, agent]);
+      } else if (type === 'tool_call') {
+        setAgents(prev => prev[agent]
+          ? { ...prev, [agent]: { ...prev[agent], currentTool: event.data } }
+          : prev
+        );
+      } else if (type === 'agent_done') {
+        setAgents(prev => prev[agent]
+          ? { ...prev, [agent]: { ...prev[agent], status: 'done', currentTool: null } }
+          : prev
+        );
+      } else if (type === 'agent_failed') {
+        setAgents(prev => prev[agent]
+          ? { ...prev, [agent]: { ...prev[agent], status: 'failed', currentTool: null } }
+          : prev
+        );
+      }
+
+      // Append to stream (cap at MAX_STREAM)
+      if (['agent_start','thinking','tool_call','agent_done','agent_failed'].includes(type)) {
+        setStream(prev => {
+          const next = [...prev, { ...event, _id: ++entryId.current }];
+          return next.length > MAX_STREAM ? next.slice(next.length - MAX_STREAM) : next;
+        });
+      }
+    };
+
+    return () => es.close();
+  }, []);
+
+  useEffect(() => {
+    const cleanup = connect(repoPath);
+    return cleanup;
+  }, [repoPath]);
+
+  // Fetch initial status when repo path changes
+  useEffect(() => {
+    if (!repoPath) { setAgents({}); setAgentOrder([]); return; }
+    fetch(`${API}/status?repo_path=${encodeURIComponent(repoPath)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data?.steps) return;
+        const next = {};
+        const order = [];
+        for (const [name, info] of Object.entries(data.steps)) {
+          next[name] = { status: info.status ?? 'idle', currentTool: null };
+          order.push(name);
+        }
+        setAgents(next);
+        setAgentOrder(order);
+      })
+      .catch(() => {});
+  }, [repoPath]);
+
+  // Fetch blackboard file list when agent is selected
+  useEffect(() => {
+    if (!selectedAgent || !repoPath) { setOutputFiles([]); return; }
+    fetch(`${API}/blackboard/list?repo_path=${encodeURIComponent(repoPath)}`)
+      .then(r => r.json())
+      .then(d => setOutputFiles(d.files ?? []))
+      .catch(() => setOutputFiles([]));
+  }, [selectedAgent, repoPath]);
+
+  const handleAgentClick = (name) => {
+    setSelectedAgent(prev => prev === name ? null : name);
+  };
+
+  const noRepo   = !repoPath;
+  const noAgents = agentOrder.length === 0;
+
+  return html`
+    <div class="root">
+
+      <!-- Header -->
+      <div class="header">
+        <div class="header-title">⬡ <span>Orchestration</span></div>
+        <div class="header-sep"></div>
+        <input
+          class="repo-input"
+          type="text"
+          placeholder="repo path, e.g. C:/projects/myapp"
+          value=${repoPath}
+          onInput=${e => setRepoPath(e.target.value)}
+        />
+        <div class=${`dot ${connected ? 'on' : 'off'}`} title=${connected ? 'Connected' : 'Disconnected'}></div>
+      </div>
+
+      <!-- Body -->
+      <div class="body">
+
+        <!-- Agent list -->
+        <div class="agent-panel">
+          <div class="panel-heading">Agents</div>
+          <div class="agent-list">
+            ${noAgents
+              ? html`<div class="empty-agents">${noRepo ? 'Enter a repo path\nto begin.' : 'Waiting for pipeline\nto start…'}</div>`
+              : agentOrder.map(name => {
+                  const ag = agents[name] ?? {};
+                  return html`<${AgentCard}
+                    key=${name}
+                    name=${name}
+                    status=${ag.status}
+                    currentTool=${ag.currentTool}
+                    selected=${selectedAgent === name}
+                    onClick=${() => handleAgentClick(name)}
+                  />`;
+                })
+            }
+          </div>
+        </div>
+
+        <!-- Right: stream + drawer -->
+        <div class="right-panel">
+          <div class="stream-panel" ref=${streamRef}>
+            ${stream.length === 0
+              ? html`<div class="stream-empty">${noRepo ? 'Enter a repo path above to connect.' : 'Waiting for agent activity…'}</div>`
+              : stream.map(entry => html`<${StreamEntry} key=${entry._id} entry=${entry} />`)
+            }
+          </div>
+
+          ${selectedAgent && html`
+            <${OutputDrawer}
+              repoPath=${repoPath}
+              selectedAgent=${selectedAgent}
+              files=${outputFiles}
+              onClose=${() => setSelectedAgent(null)}
+            />
+          `}
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
+render(html`<${App} />`, document.getElementById('root'));
+</script>
+</body>
+</html>

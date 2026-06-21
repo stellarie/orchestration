@@ -14,6 +14,7 @@ from session import SessionManager
 from memory import MemoryManager
 from tools import TOOL_SCHEMAS, READ_ONLY_TOOLS, CONTRACT_TOOLS, ToolExecutor, build_tool_schemas
 from grimoire import load_for as _load_grimoire
+from event_bus import bus
 
 
 # ── Lightweight wrappers that mirror the OpenAI response shape ───────────────
@@ -94,29 +95,42 @@ class BaseAgent:
         self.client     = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
         self._log_path: Path | None = None   # resolved lazily on first write
 
+    def _emit(self, type: str, data: str = "") -> None:
+        bus.emit({
+            "type":      type,
+            "agent":     self.NAME,
+            "repo_path": self.repo_path,
+            "data":      data,
+            "ts":        datetime.now().isoformat(),
+        })
+
     def run(
         self,
         instruction:    str,
         resume_session: bool = False,
         output_suffix:  str  = "",
     ) -> dict:
-        episodic = self.memory.read(self.NAME)
-        system   = self._build_system(episodic, output_suffix, instruction)
-        messages = self.session.load(self.NAME) if resume_session else []
-        messages.append({"role": "user", "content": instruction})
+        self._emit("agent_start")
+        try:
+            episodic = self.memory.read(self.NAME)
+            system   = self._build_system(episodic, output_suffix, instruction)
+            messages = self.session.load(self.NAME) if resume_session else []
+            messages.append({"role": "user", "content": instruction})
 
-        caps = AGENT_CAPABILITIES.get(self.NAME)
-        if caps is not None:
-            tools = build_tool_schemas(caps["tools"])
-        else:
-            # fallback for agents not in AGENT_CAPABILITIES (e.g. orchestrator)
-            tools = (CONTRACT_TOOLS if self.CONTRACT_ONLY
-                     else READ_ONLY_TOOLS if self.READ_ONLY
-                     else TOOL_SCHEMAS)
-        result = self._agentic_loop(messages, system, tools)
-
-        self.session.save(self.NAME, self._strip_reasoning(messages))
-        return result
+            caps = AGENT_CAPABILITIES.get(self.NAME)
+            if caps is not None:
+                tools = build_tool_schemas(caps["tools"])
+            else:
+                tools = (CONTRACT_TOOLS if self.CONTRACT_ONLY
+                         else READ_ONLY_TOOLS if self.READ_ONLY
+                         else TOOL_SCHEMAS)
+            result = self._agentic_loop(messages, system, tools)
+            self.session.save(self.NAME, self._strip_reasoning(messages))
+            self._emit("agent_done")
+            return result
+        except Exception:
+            self._emit("agent_failed")
+            raise
 
     def _load_prompt(self) -> str:
         path = PROMPTS_DIR / f"{self.NAME}.md"
@@ -198,6 +212,7 @@ class BaseAgent:
                 all_thinking.append(f"### Step {step + 1}\n{thinking}")
                 logger.debug("[%s] step %d thinking:\n%s", self.NAME, step + 1, thinking)
                 self._log_thinking(thinking)
+                self._emit("thinking", thinking)
 
             assistant_entry = {
                 "role":    "assistant",
@@ -227,6 +242,7 @@ class BaseAgent:
 
             for tc in tool_calls:
                 self._log_tool_call(tc.function.name)
+                self._emit("tool_call", tc.function.name)
                 try:
                     args, coerced = _parse_json(tc.function.arguments)
                     if coerced:

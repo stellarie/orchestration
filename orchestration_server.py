@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import time
 import threading
@@ -5,11 +7,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from logging_config import setup_logging
 from blackboard import BlackBoard
 from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY
+from event_bus import bus
 from validators import validate_agent_output
 
 setup_logging()
@@ -44,6 +49,11 @@ AGENT_MAP = {
 }
 
 app = FastAPI(title="Orchestration Server", version="0.1.0")
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    bus.set_loop(asyncio.get_event_loop())
 
 
 # ── request/response models ──────────────────────────────────────────────────
@@ -214,6 +224,45 @@ def run_batch(req: RunBatchRequest):
     }
 
 
+@app.get("/stream")
+async def stream_events(repo_path: str = ""):
+    """SSE endpoint — browsers connect here to receive live agent events."""
+    q = bus.subscribe()
+
+    async def generate():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=25)
+                    if repo_path and event.get("repo_path") not in ("", repo_path):
+                        continue
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            bus.unsubscribe(q)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/blackboard/list")
+def list_blackboard(repo_path: str):
+    _require_repo(repo_path)
+    bb_dir = Path(repo_path) / ".blackboard"
+    if not bb_dir.exists():
+        return {"files": []}
+    files = sorted(
+        str(f.relative_to(bb_dir)).replace("\\", "/")
+        for f in bb_dir.rglob("*") if f.is_file()
+    )
+    return {"files": files}
+
+
 @app.get("/blackboard")
 def read_blackboard(repo_path: str, filename: str):
     _require_repo(repo_path)
@@ -242,6 +291,11 @@ def _require_repo(path: str):
 
 
 # ── entry point ──────────────────────────────────────────────────────────────
+
+_frontend = Path(__file__).parent / "frontend"
+if _frontend.exists():
+    app.mount("/", StaticFiles(directory=str(_frontend), html=True), name="frontend")
+
 
 if __name__ == "__main__":
     import uvicorn
