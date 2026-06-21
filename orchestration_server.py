@@ -182,6 +182,13 @@ def pipeline_run(req: PipelineRunRequest):
 
     def _run_pipeline():
         for agent_name in PIPELINE_ORDER:
+            # If this agent was activated independently, wait for it to finish
+            # before running the pipeline step — it finishes its task first.
+            import time as _time
+            while agent_name in interrupt_bus.active():
+                logger.info("[pipeline] waiting for %s to finish independent run", agent_name)
+                _time.sleep(2)
+
             try:
                 bb.update_status(agent_name, "in_progress", increment_iteration=True)
                 agent  = AGENT_MAP[agent_name](req.repo_path, force_deepseek=True)
@@ -297,6 +304,44 @@ async def stream_events(repo_path: str = ""):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class AgentActivateRequest(BaseModel):
+    agent:       str
+    repo_path:   str
+    instruction: str
+
+
+@app.post("/agent/activate")
+def agent_activate(req: AgentActivateRequest):
+    """Start an agent immediately in a background thread, outside the pipeline order.
+
+    If the agent is already running, the instruction is queued in its inbox
+    instead (it will pick it up at the next loop step).
+    """
+    if req.agent not in AGENT_MAP:
+        raise HTTPException(400, f"Unknown agent '{req.agent}'")
+    _require_repo(req.repo_path)
+
+    if req.agent in interrupt_bus.active():
+        result = interrupt_bus.send(req.agent, req.instruction)
+        return {"agent": req.agent, "status": "queued", **result}
+
+    bb = BlackBoard(req.repo_path)
+    bb.update_status(req.agent, "in_progress", increment_iteration=True)
+
+    def _run():
+        try:
+            agent  = AGENT_MAP[req.agent](req.repo_path)
+            result = agent.run(req.instruction)
+            status = "done" if result["status"] == "success" else "failed"
+        except Exception:
+            logger.exception("[activate] agent=%s crashed", req.agent)
+            status = "failed"
+        bb.update_status(req.agent, status)
+
+    threading.Thread(target=_run, daemon=True, name=f"activate-{req.agent}").start()
+    return {"agent": req.agent, "status": "started"}
 
 
 class AgentPromptRequest(BaseModel):

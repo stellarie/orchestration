@@ -254,6 +254,13 @@
     }
     .compose-send:hover { background: #4f9cff; }
     .compose-send:disabled { opacity: .35; cursor: default; }
+    .compose-run {
+      background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.3);
+      color: var(--green); padding: 4px 12px; border-radius: 5px;
+      font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .compose-run:hover { background: rgba(63,185,80,.22); border-color: var(--green); }
+    .compose-run:disabled { opacity: .35; cursor: default; }
 
     .entry-interrupt {
       color: var(--orange); padding: 1px 0; font-style: italic;
@@ -412,23 +419,29 @@ function StreamEntry({ entry }) {
 
 // ── ComposeBar ───────────────────────────────────────────────────────────────
 
-function ComposeBar({ agents, agentOrder }) {
-  const [target,  setTarget]  = useState('');
-  const [text,    setText]    = useState('');
-  const [busy,    setBusy]    = useState(false);
-  const [feedback, setFeedback] = useState('');  // 'live' | 'pending' | ''
+function ComposeBar({ agents, agentOrder, repoPath }) {
+  const [target,   setTarget]   = useState('');
+  const [text,     setText]     = useState('');
+  const [busy,     setBusy]     = useState(false);
+  const [feedback, setFeedback] = useState('');  // '' | 'sent' | 'queued' | 'started'
 
   // Auto-select first agent when list populates
   useEffect(() => {
     if (agentOrder.length && !target) setTarget(agentOrder[0]);
   }, [agentOrder.length]);
 
-  const canSend = !!target && !!text.trim() && !busy;
+  const canAct = !!target && !!text.trim() && !busy;
 
-  const send = async () => {
-    if (!canSend) return;
+  const flash = (label) => {
+    setFeedback(label);
+    setText('');
+    setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // Queue message into agent inbox (existing behaviour)
+  const queue = async () => {
+    if (!canAct) return;
     setBusy(true);
-    setFeedback('');
     try {
       const r = await fetch(`${API}/agent/prompt`, {
         method: 'POST',
@@ -436,15 +449,26 @@ function ComposeBar({ agents, agentOrder }) {
         body: JSON.stringify({ agent: target, message: text.trim() }),
       });
       const d = await r.json();
-      setText('');
-      setFeedback(d.live ? 'live' : 'pending');
-      setTimeout(() => setFeedback(''), 3000);
-    } finally {
-      setBusy(false);
-    }
+      flash(d.live ? 'sent ✓' : 'queued ✓');
+    } finally { setBusy(false); }
   };
 
-  const onKey = (e) => { if (e.key === 'Enter') send(); };
+  // Activate agent immediately with this as the instruction
+  const activate = async () => {
+    if (!canAct || !repoPath) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`${API}/agent/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: target, repo_path: repoPath, instruction: text.trim() }),
+      });
+      const d = await r.json();
+      flash(d.status === 'started' ? 'started ✓' : 'queued ✓');
+    } finally { setBusy(false); }
+  };
+
+  const onKey = (e) => { if (e.key === 'Enter') queue(); };
 
   const isLive = agents[target]?.status === 'in_progress';
 
@@ -473,8 +497,11 @@ function ComposeBar({ agents, agentOrder }) {
         onKeyDown=${onKey}
         disabled=${!agentOrder.length}
       />
-      <button class="compose-send" onClick=${send} disabled=${!canSend}>
-        ${busy ? '…' : feedback === 'live' ? 'sent ✓' : feedback === 'pending' ? 'queued ✓' : 'Send'}
+      <button class="compose-send" onClick=${queue} disabled=${!canAct} title="Queue message (Enter)">
+        ${busy ? '…' : feedback || 'Queue'}
+      </button>
+      <button class="compose-run" onClick=${activate} disabled=${!canAct || !repoPath} title="Activate agent now">
+        ▶ Run
       </button>
     </div>
   `;
@@ -709,7 +736,7 @@ function App() {
             }
           </div>
 
-          <${ComposeBar} agents=${agents} agentOrder=${agentOrder} />
+          <${ComposeBar} agents=${agents} agentOrder=${agentOrder} repoPath=${repoPath} />
 
           ${selectedAgent && html`
             <${OutputDrawer}
