@@ -106,6 +106,68 @@
       padding: 32px 14px; text-align: center; color: var(--dim); font-size: 12px; line-height: 1.6;
     }
 
+    /* ── pipeline graph ── */
+    .pipeline-graph { overflow-y: auto; flex: 1; padding: 8px 10px 12px; }
+    .pipeline-graph::-webkit-scrollbar { width: 4px; }
+    .pipeline-graph::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .pg-section-label {
+      font-size: 10px; font-weight: 600; letter-spacing: .6px; color: var(--dim);
+      text-transform: uppercase; padding: 10px 4px 6px;
+    }
+
+    .pg-node {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface2);
+      cursor: pointer; transition: border-color .2s, background .15s;
+    }
+    .pg-node:hover { background: #252c38; }
+    .pg-node.selected { box-shadow: 0 0 0 2px var(--blue); }
+    .pg-node--in_progress { border-color: var(--blue); background: rgba(56,139,253,.07); }
+    .pg-node--done        { border-color: rgba(63,185,80,.5); background: rgba(63,185,80,.05); }
+    .pg-node--failed      { border-color: var(--red); background: rgba(248,81,73,.06); }
+
+    .pg-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      background: var(--border);
+    }
+    .pg-node--in_progress .pg-dot {
+      background: var(--blue); box-shadow: 0 0 5px var(--blue);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .pg-node--done   .pg-dot { background: var(--green); }
+    .pg-node--failed .pg-dot { background: var(--red); }
+
+    .pg-info { flex: 1; min-width: 0; }
+    .pg-name { font-size: 12.5px; font-weight: 500; color: var(--text); }
+    .pg-sub  { font-size: 10px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+    .pg-badge {
+      font-size: 9.5px; font-weight: 600; padding: 2px 5px; border-radius: 8px;
+      flex-shrink: 0; text-transform: uppercase; letter-spacing: .3px;
+    }
+    .pg-badge--idle        { background: transparent; color: var(--dim); }
+    .pg-badge--in_progress { background: rgba(56,139,253,.15); color: var(--blue); }
+    .pg-badge--done        { background: rgba(63,185,80,.15);  color: var(--green); }
+    .pg-badge--failed      { background: rgba(248,81,73,.15);  color: var(--red); }
+
+    .pg-connector {
+      display: flex; flex-direction: column; align-items: center;
+      height: 18px; flex-shrink: 0;
+    }
+    .pg-connector-line  { width: 1px; flex: 1; background: var(--border); }
+    .pg-connector-arrow {
+      width: 0; height: 0;
+      border-left: 3px solid transparent;
+      border-right: 3px solid transparent;
+      border-top: 4px solid var(--border);
+    }
+    .pg-connector--done .pg-connector-line  { background: rgba(63,185,80,.5); }
+    .pg-connector--done .pg-connector-arrow { border-top-color: rgba(63,185,80,.5); }
+    .pg-connector--in_progress .pg-connector-line  { background: var(--blue); }
+    .pg-connector--in_progress .pg-connector-arrow { border-top-color: var(--blue); }
+
     .new-btn {
       margin: 8px 10px 2px; padding: 6px 10px;
       background: rgba(56,139,253,.12); border: 1px solid rgba(56,139,253,.3);
@@ -357,6 +419,56 @@ function NewProjectModal({ defaultRepo, onClose, onStarted }) {
           </button>
         </div>
       </div>
+    </div>
+  `;
+}
+
+const PIPELINE_AGENTS = [
+  "architect", "designer", "planner", "scaffolder",
+  "tester", "reviewer", "test-generator", "coder",
+  "qa-tester", "code-reviewer", "commit", "documentation",
+];
+const PIPELINE_SET = new Set(PIPELINE_AGENTS);
+
+// ── PipelineGraph ────────────────────────────────────────────────────────────
+
+function PipelineGraph({ agents, agentOrder, selectedAgent, onSelect }) {
+  const independents = agentOrder.filter(n => !PIPELINE_SET.has(n));
+
+  const renderNode = (name) => {
+    const ag = agents[name] ?? {};
+    const st = ag.status ?? 'idle';
+    return html`
+      <div
+        class=${`pg-node pg-node--${st}${selectedAgent === name ? ' selected' : ''}`}
+        onClick=${() => onSelect(name)}
+      >
+        <div class="pg-dot"></div>
+        <div class="pg-info">
+          <div class="pg-name">${name}</div>
+          ${ag.currentTool && html`<div class="pg-sub">→ ${ag.currentTool}</div>`}
+        </div>
+        <div class=${`pg-badge pg-badge--${st}`}>${LABEL[st] ?? st}</div>
+      </div>
+    `;
+  };
+
+  return html`
+    <div class="pipeline-graph">
+      ${PIPELINE_AGENTS.map((name, i) => html`
+        ${renderNode(name)}
+        ${i < PIPELINE_AGENTS.length - 1 && html`
+          <div class=${`pg-connector pg-connector--${agents[name]?.status ?? 'idle'}`}>
+            <div class="pg-connector-line"></div>
+            <div class="pg-connector-arrow"></div>
+          </div>
+        `}
+      `)}
+
+      ${independents.length > 0 && html`
+        <div class="pg-section-label">Independent</div>
+        ${independents.map(name => renderNode(name))}
+      `}
     </div>
   `;
 }
@@ -705,26 +817,16 @@ function App() {
       <!-- Body -->
       <div class="body">
 
-        <!-- Agent list -->
+        <!-- Pipeline graph -->
         <div class="agent-panel">
-          <div class="panel-heading">Agents</div>
+          <div class="panel-heading">Pipeline</div>
           <button class="new-btn" onClick=${() => setShowNewProject(true)}>+ New Pipeline Run</button>
-          <div class="agent-list">
-            ${noAgents
-              ? html`<div class="empty-agents">${noRepo ? 'Enter a repo path\nto begin.' : 'Waiting for pipeline\nto start…'}</div>`
-              : agentOrder.map(name => {
-                  const ag = agents[name] ?? {};
-                  return html`<${AgentCard}
-                    key=${name}
-                    name=${name}
-                    status=${ag.status}
-                    currentTool=${ag.currentTool}
-                    selected=${selectedAgent === name}
-                    onClick=${() => handleAgentClick(name)}
-                  />`;
-                })
-            }
-          </div>
+          <${PipelineGraph}
+            agents=${agents}
+            agentOrder=${agentOrder}
+            selectedAgent=${selectedAgent}
+            onSelect=${handleAgentClick}
+          />
         </div>
 
         <!-- Right: stream + drawer -->
