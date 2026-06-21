@@ -88,6 +88,17 @@ class BlackboardWriteRequest(BaseModel):
     append:    bool = False
 
 
+class PipelineRunRequest(BaseModel):
+    repo_path:   str
+    description: str
+
+
+PIPELINE_ORDER = [
+    "architect", "designer", "planner", "scaffolder", "tester", "reviewer",
+    "test-generator", "coder", "qa-tester", "code-reviewer", "commit", "documentation",
+]
+
+
 # ── endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -148,6 +159,44 @@ def run_agent(req: RunRequest):
     bb.update_status(req.agent, final_status)
 
     return {**result, "validation": {"passed": val_passed, "issues": val_issues}}
+
+
+@app.post("/pipeline/run")
+def pipeline_run(req: PipelineRunRequest):
+    """Start the full 12-agent pipeline in a background thread.
+
+    All agents run with force_deepseek=True (full-auto mode).
+    Returns immediately; progress arrives via /stream SSE.
+    """
+    _require_repo(req.repo_path)
+    task_id = str(uuid.uuid4())[:8]
+    bb      = BlackBoard(req.repo_path)
+    bb.init_task(task_id, req.description)
+    bb.write("run-id", task_id)
+
+    instr = (
+        "Complete your pipeline role. "
+        "The task is described in .blackboard/task.md. "
+        "Read all relevant blackboard files from previous pipeline steps before acting."
+    )
+
+    def _run_pipeline():
+        for agent_name in PIPELINE_ORDER:
+            try:
+                bb.update_status(agent_name, "in_progress", increment_iteration=True)
+                agent  = AGENT_MAP[agent_name](req.repo_path, force_deepseek=True)
+                result = agent.run(instr)
+                status = "done" if result["status"] == "success" else "failed"
+            except Exception:
+                logger.exception("[pipeline] agent=%s crashed", agent_name)
+                status = "failed"
+            bb.update_status(agent_name, status)
+            if status == "failed":
+                logger.warning("[pipeline] stopping at agent=%s", agent_name)
+                break
+
+    threading.Thread(target=_run_pipeline, daemon=True, name=f"pipeline-{task_id}").start()
+    return {"task_id": task_id, "status": "started"}
 
 
 @app.post("/run-batch")

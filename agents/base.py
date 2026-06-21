@@ -84,14 +84,17 @@ class BaseAgent:
     READ_ONLY     = False
     CONTRACT_ONLY = False  # test-generator: read_file replaced by read_contract_file
 
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, force_deepseek: bool = False):
         self.repo_path  = repo_path
         self.bb         = BlackBoard(repo_path)
         self.session    = SessionManager(repo_path)
         self.memory     = MemoryManager(repo_path)
         caps            = AGENT_CAPABILITIES.get(self.NAME, {})
         self.executor   = ToolExecutor(repo_path, self.bb, write_deny=caps.get("write_deny", []))
-        self.cfg        = MODELS[self.NAME]
+        self.cfg        = dict(MODELS[self.NAME])
+        if force_deepseek and self.cfg.get("provider") == "anthropic":
+            self.cfg["provider"] = "deepseek"
+            self.cfg["model"]    = "deepseek-v4-pro"
         self.client     = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
         self._log_path: Path | None = None   # resolved lazily on first write
 
