@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from logging_config import setup_logging
 from blackboard import BlackBoard
 from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY
-from event_bus import bus
+from event_bus import bus, interrupt_bus
 from validators import validate_agent_output
 
 setup_logging()
@@ -297,6 +297,26 @@ async def stream_events(repo_path: str = ""):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class AgentPromptRequest(BaseModel):
+    agent:   str
+    message: str
+
+
+@app.post("/agent/prompt")
+def agent_prompt(req: AgentPromptRequest):
+    """Inject a user message into a running agent's conversation mid-loop."""
+    if req.agent not in AGENT_MAP:
+        raise HTTPException(400, f"Unknown agent '{req.agent}'")
+    queued = interrupt_bus.send(req.agent, req.message)
+    return {"agent": req.agent, "queued": queued}
+
+
+@app.get("/agent/active")
+def agent_active():
+    """Return the list of agents that currently have an active interrupt queue."""
+    return {"agents": interrupt_bus.active()}
 
 
 @app.get("/blackboard/list")

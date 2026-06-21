@@ -14,7 +14,8 @@ from session import SessionManager
 from memory import MemoryManager
 from tools import TOOL_SCHEMAS, READ_ONLY_TOOLS, CONTRACT_TOOLS, ToolExecutor, build_tool_schemas
 from grimoire import load_for as _load_grimoire
-from event_bus import bus
+import queue as _queue
+from event_bus import bus, interrupt_bus
 
 
 # ── Lightweight wrappers that mirror the OpenAI response shape ───────────────
@@ -95,8 +96,9 @@ class BaseAgent:
         if force_deepseek and self.cfg.get("provider") == "anthropic":
             self.cfg["provider"] = "deepseek"
             self.cfg["model"]    = "deepseek-v4-pro"
-        self.client     = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
-        self._log_path: Path | None = None   # resolved lazily on first write
+        self.client       = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        self._log_path:   Path | None          = None  # resolved lazily on first write
+        self._interrupt_q: _queue.Queue | None = None  # registered at run()-time
 
     def _emit(self, type: str, data: str = "") -> None:
         bus.emit({
@@ -113,6 +115,8 @@ class BaseAgent:
         resume_session: bool = False,
         output_suffix:  str  = "",
     ) -> dict:
+        self._interrupt_q = _queue.Queue()
+        interrupt_bus.register(self.NAME, self._interrupt_q)
         self._emit("agent_start")
         try:
             episodic = self.memory.read(self.NAME)
@@ -134,6 +138,9 @@ class BaseAgent:
         except Exception:
             self._emit("agent_failed")
             raise
+        finally:
+            interrupt_bus.unregister(self.NAME)
+            self._interrupt_q = None
 
     def _load_prompt(self) -> str:
         path = PROMPTS_DIR / f"{self.NAME}.md"
@@ -206,6 +213,16 @@ class BaseAgent:
         max_steps = AGENT_TOOL_ITERATIONS.get(self.NAME, MAX_TOOL_ITERATIONS)
 
         for step in range(max_steps):
+            # Drain any user-injected messages before the next API call
+            while self._interrupt_q:
+                try:
+                    user_msg = self._interrupt_q.get_nowait()
+                except _queue.Empty:
+                    break
+                logger.info("[%s] user interrupt: %s", self.NAME, user_msg[:120])
+                self._emit("user_interrupt", user_msg)
+                messages.append({"role": "user", "content": user_msg})
+
             response   = self._call_api(messages, system, tools)
             msg        = response.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None) or []

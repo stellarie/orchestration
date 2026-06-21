@@ -225,6 +225,41 @@
     .drawer-body::-webkit-scrollbar { width: 4px; }
     .drawer-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     .drawer-placeholder { color: var(--dim); font-family: 'Segoe UI', sans-serif; }
+
+    /* ── compose bar ── */
+    .compose-bar {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 12px; flex-shrink: 0;
+    }
+    .compose-label { font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: .4px; white-space: nowrap; }
+    .compose-select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 4px 8px; border-radius: 5px; font-size: 12px;
+      font-family: 'Consolas', monospace; outline: none; max-width: 130px;
+    }
+    .compose-select:focus { border-color: var(--blue); }
+    .compose-input {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 4px 10px; border-radius: 5px;
+      font-size: 13px; outline: none; min-width: 0;
+    }
+    .compose-input:focus { border-color: var(--blue); }
+    .compose-input::placeholder { color: var(--dim); }
+    .compose-send {
+      background: var(--blue); border: none; color: #fff;
+      padding: 4px 14px; border-radius: 5px; font-size: 12px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .compose-send:hover { background: #4f9cff; }
+    .compose-send:disabled { opacity: .35; cursor: default; }
+
+    .entry-interrupt {
+      color: var(--orange); padding: 1px 0; font-style: italic;
+    }
+    .entry-interrupt .ts { color: var(--dim); font-size: 11px; margin-right: 6px; }
+    .entry-interrupt .itag { color: var(--yellow); margin-right: 4px; font-style: normal; }
   </style>
 </head>
 <body>
@@ -365,7 +400,75 @@ function StreamEntry({ entry }) {
     </div>
   `;
 
+  if (type === 'user_interrupt') return html`
+    <div class="entry entry-interrupt">
+      <span class="ts">${fmtTime(ts)}</span>
+      <span class="itag">[you → ${agent}]</span>${data}
+    </div>
+  `;
+
   return null;
+}
+
+// ── ComposeBar ───────────────────────────────────────────────────────────────
+
+function ComposeBar({ agents, agentOrder }) {
+  const activeAgents = agentOrder.filter(n => agents[n]?.status === 'in_progress');
+  const [target, setTarget] = useState('');
+  const [text,   setText]   = useState('');
+  const [busy,   setBusy]   = useState(false);
+
+  // Auto-select first active agent
+  useEffect(() => {
+    if (activeAgents.length && !activeAgents.includes(target)) {
+      setTarget(activeAgents[0]);
+    }
+    if (!activeAgents.length) setTarget('');
+  }, [activeAgents.join(',')]);
+
+  const canSend = !!target && !!text.trim() && !busy;
+
+  const send = async () => {
+    if (!canSend) return;
+    setBusy(true);
+    try {
+      await fetch(`${API}/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: target, message: text.trim() }),
+      });
+      setText('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKey = (e) => { if (e.key === 'Enter') send(); };
+
+  return html`
+    <div class="compose-bar">
+      <span class="compose-label">PROMPT</span>
+      <select
+        class="compose-select"
+        value=${target}
+        onChange=${e => setTarget(e.target.value)}
+        disabled=${!activeAgents.length}
+      >
+        ${!activeAgents.length && html`<option value="">— no agents running —</option>`}
+        ${activeAgents.map(n => html`<option key=${n} value=${n}>${n}</option>`)}
+      </select>
+      <input
+        class="compose-input"
+        type="text"
+        placeholder=${activeAgents.length ? `Message ${target || '…'}` : 'No agents running'}
+        value=${text}
+        onInput=${e => setText(e.target.value)}
+        onKeyDown=${onKey}
+        disabled=${!activeAgents.length}
+      />
+      <button class="compose-send" onClick=${send} disabled=${!canSend}>Send</button>
+    </div>
+  `;
 }
 
 // ── OutputDrawer ────────────────────────────────────────────────────────────
@@ -596,6 +699,8 @@ function App() {
               : stream.map(entry => html`<${StreamEntry} key=${entry._id} entry=${entry} />`)
             }
           </div>
+
+          <${ComposeBar} agents=${agents} agentOrder=${agentOrder} />
 
           ${selectedAgent && html`
             <${OutputDrawer}
