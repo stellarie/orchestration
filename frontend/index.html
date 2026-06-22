@@ -749,7 +749,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
 
 // ── PipelineGraph ────────────────────────────────────────────────────────────
 
-function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSelect, onSkipToggle,
+function PipelineGraph({ pipelineId, agents, agentOrder, selectedAgent, skippedAgents, onSelect, onSkipToggle,
                           showPrePrompts, agentOverrides, onOverrideChange,
                           isRunning, onAgentControl }) {
   const independents = agentOrder.filter(n => !PIPELINE_SET.has(n) && n !== 'consultant');
@@ -757,8 +757,9 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
   const [collapsed,   setCollapsed]   = useState({});
 
   useEffect(() => {
-    fetch(`${API}/pipeline/steps`).then(r => r.json()).then(setSteps).catch(() => {});
-  }, []);
+    const url = pipelineId ? `${API}/pipeline/${pipelineId}/steps` : `${API}/pipeline/steps`;
+    fetch(url).then(r => r.json()).then(setSteps).catch(() => {});
+  }, [pipelineId]);
 
   const toggleCollapse = (key) => setCollapsed(prev => ({...prev, [key]: !prev[key]}));
 
@@ -1292,6 +1293,7 @@ function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
         `}
 
         <${PipelineGraph}
+          pipelineId=${id}
           agents=${agents}
           agentOrder=${agentOrder}
           selectedAgent=${selectedAgent}

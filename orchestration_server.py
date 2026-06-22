@@ -189,7 +189,8 @@ class PipelineEntry:
     status:             str  # 'running' | 'queued' | 'done' | 'failed' | 'paused' | 'stopped'
     skip_agents:        set  = dc_field(default_factory=set)
     agent_overrides:    dict = dc_field(default_factory=dict)
-    source_pipeline_id: str  = ""   # inject handoff.md from this pipeline when starting
+    source_pipeline_id: str  = ""    # inject handoff.md from this pipeline when starting
+    steps_key:          str  = "dev" # "dev" | "research" | "research_analysis" | "scout"
     created_at:         str  = dc_field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -749,19 +750,41 @@ def health():
     return {"status": "ok", "anthropic_available": bool(ANTHROPIC_API_KEY)}
 
 
-@app.get("/pipeline/steps")
-def get_pipeline_steps():
-    """Return the PIPELINE_STEPS structure so the frontend can render step groups."""
-    def _serialise(step):
+def _serialise_steps(steps: list) -> list:
+    def _s(step):
         if isinstance(step, str):
             return {"type": "single", "agent": step}
         if isinstance(step, dict):
             return {"type": "parallel", "agent": step["agent"],
                     "count": step.get("count", 1), "reconcile": step.get("reconcile", False)}
         if isinstance(step, list):
-            return {"type": "fanout", "entries": [_serialise(s) for s in step]}
+            return {"type": "fanout", "entries": [_s(s) for s in step]}
         return {}
-    return [_serialise(s) for s in PIPELINE_STEPS]
+    return [_s(s) for s in steps]
+
+_STEPS_MAP = {
+    "dev":               PIPELINE_STEPS,
+    "research":          RESEARCH_PIPELINE_STEPS,
+    "research_analysis": RESEARCH_ANALYSIS_STEPS,
+    "scout":             OSS_SCOUT_STEPS,
+}
+
+
+@app.get("/pipeline/steps")
+def get_pipeline_steps():
+    """Return the dev PIPELINE_STEPS structure (legacy / overview use)."""
+    return _serialise_steps(PIPELINE_STEPS)
+
+
+@app.get("/pipeline/{pipeline_id}/steps")
+def get_pipeline_steps_for(pipeline_id: str):
+    """Return the step list used by a specific pipeline."""
+    with _reg_lock:
+        entry = _pipeline_registry.get(pipeline_id)
+    if not entry:
+        raise HTTPException(404, f"Pipeline '{pipeline_id}' not found")
+    steps = _STEPS_MAP.get(entry.steps_key, PIPELINE_STEPS)
+    return _serialise_steps(steps)
 
 
 @app.post("/task/init")
@@ -904,11 +927,13 @@ def research_run(req: ResearchRunRequest):
     """Run the research pipeline, optionally queuing a dev pipeline after."""
     _ensure_repo(req.repo_path)
     pipeline_id = str(uuid.uuid4())[:8]
+    steps_key   = "research_analysis" if req.with_analysis else "research"
     entry = PipelineEntry(
         pipeline_id=pipeline_id,
         repo_path=req.repo_path,
         task_desc=req.description,
         status="running",
+        steps_key=steps_key,
     )
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
@@ -984,6 +1009,7 @@ def scout_run(req: ScoutRunRequest):
         repo_path=req.repo_path,
         task_desc=req.description,
         status="running",
+        steps_key="scout",
     )
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
@@ -1178,6 +1204,7 @@ def list_pipelines():
                 "skip_agents":        list(e.skip_agents),
                 "agent_overrides":    e.agent_overrides,
                 "source_pipeline_id": e.source_pipeline_id,
+                "steps_key":          e.steps_key,
                 "created_at":         e.created_at,
             }
             for e in _pipeline_registry.values()
