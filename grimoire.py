@@ -18,7 +18,9 @@ GRIMOIRE_ROOT = Path.home() / "grimoire"
 _AGENT_GRIMOIRE: dict[str, str | None] = {
     "orchestrator":   None,
     "architect":      "universal/systems-design-grimoire.md",
-    "designer":       "stack/grimoire-of-the-cursed-guild.md",
+    "designer":       "universal/frontend-design.md",
+    "reconciler":     None,
+    "consultant":     None,
     "planner":        "universal/systems-design-grimoire.md",
     "tester":         "universal/testing-grimoire.md",
     "reviewer":       "universal/testing-grimoire.md",

@@ -85,9 +85,10 @@ class BaseAgent:
     READ_ONLY     = False
     CONTRACT_ONLY = False  # test-generator: read_file replaced by read_contract_file
 
-    def __init__(self, repo_path: str, force_deepseek: bool = False):
-        self.repo_path  = repo_path
-        self.bb         = BlackBoard(repo_path)
+    def __init__(self, repo_path: str, force_deepseek: bool = False, pipeline_id: str = ""):
+        self.repo_path   = repo_path
+        self.pipeline_id = pipeline_id
+        self.bb          = BlackBoard(repo_path)
         self.session    = SessionManager(repo_path)
         self.memory     = MemoryManager(repo_path)
         caps            = AGENT_CAPABILITIES.get(self.NAME, {})
@@ -102,11 +103,12 @@ class BaseAgent:
 
     def _emit(self, type: str, data: str = "") -> None:
         bus.emit({
-            "type":      type,
-            "agent":     self.NAME,
-            "repo_path": self.repo_path,
-            "data":      data,
-            "ts":        datetime.now().isoformat(),
+            "type":        type,
+            "agent":       self.NAME,
+            "repo_path":   self.repo_path,
+            "pipeline_id": self.pipeline_id,
+            "data":        data,
+            "ts":          datetime.now().isoformat(),
         })
 
     def run(
@@ -271,6 +273,8 @@ class BaseAgent:
 
             if not tool_calls:
                 self._write_thinking(all_thinking)
+                if msg.content:
+                    self._emit("message", msg.content)
                 return {
                     "status":    "success",
                     "output":    msg.content or "",

@@ -62,6 +62,8 @@ class BlackBoard:
             if not s:
                 return
             s["current_step"] = step
+            if step not in s["steps"]:
+                s["steps"][step] = {"status": "pending", "iterations": 0}
             s["steps"][step]["status"] = status
             if increment_iteration:
                 s["steps"][step]["iterations"] += 1

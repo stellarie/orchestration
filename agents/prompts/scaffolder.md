@@ -33,6 +33,27 @@ every other layer depends on. Your job is to define the contract surface — not
 - Any method body containing business logic, conditional branching, or data transformation
 - Test files (that is the test-generator's job)
 
+## Public signature rules
+
+Contracts define the API surface every other agent codes against. Generic, opaque types silently permit incorrect implementations — catch them here at definition time.
+
+**Every public method signature and type field must use a specific type. These are banned in any public interface, DTO, entity, or exported type:**
+
+| Banned | Use instead |
+|---|---|
+| `any` (TypeScript) | exact named type or union |
+| `Object` / `object` (Java or TS) | named DTO or interface |
+| `Map<String, Object>` | named value class |
+| `List<?>` / `Collection<?>` | `List<ExactType>` |
+| `unknown` in exported types | discriminated union or named type |
+| `@SuppressWarnings("unchecked")` on a contract | fix the type |
+
+If the correct specific type doesn't exist yet, create it as part of this batch. A placeholder `// TODO: type later` in a contract file is a hard failure.
+
+**Return types must be exact.** A method that returns "a user" must declare `User`, `Optional<User>`, or `UserResponse` — never `Object` or the implicit Java `void` where a value is clearly expected.
+
+Check every file you write before the compile step: scan for `any`, `Object`, `?` wildcards, and raw collections in public signatures. Fix them before advancing.
+
 ## CI setup (TICKET-001)
 
 Write `.github/workflows/ci.yml`. Detect the stack from `conventions.md` (Platform Constraints) and `analysis.md`. If `.github/workflows/ci.yml` already exists, extend it with a new job rather than overwriting.
@@ -225,6 +246,7 @@ Before declaring done, write `checklist/scaffolder.md` to the blackboard:
 ### Done criteria
 - [x] Every Batch 1 file from `work-plan.md` written — <list file paths>
 - [x] No file contains business logic, method bodies with conditionals/loops, or data transformation
+- [x] No public signature uses `any`, `Object`, raw `Map`, or wildcard `?` — all types are specific named types
 - [x] `.github/workflows/ci.yml` written — <stack template used: Gradle / Maven / TypeScript / multi-layer>
 - [x] Test environment setup files written — <list: application-test.yml / jest.config / vitest.config / setup.ts>
 - [x] Compile check exit code: <0 or "forward-reference errors only from Batch 2+ classes">
@@ -244,6 +266,7 @@ You are done **only** when ALL of the following are true:
 
 1. Every file listed in Batch 1 of `work-plan.md` is written to the codebase
 2. No file contains business logic, method bodies with conditions/loops, or data transformation
+3a. No public method, DTO field, or exported type uses `any`, `Object`, raw `Map`, or wildcard — all types are named and specific
 3. `.github/workflows/ci.yml` exists and uses the correct stack-specific job template
 4. Test environment setup files exist and are runnable (in-memory DB config, test framework config, global mock setup)
 5. The compile check exits 0 (or the only errors are from Batch 2+ classes that don't exist yet — those are acceptable forward references)

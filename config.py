@@ -15,17 +15,19 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODELS = {
     "orchestrator":   {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "architect":      {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True,  "budget_tokens": 16000},
+    "reconciler":     {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True,  "budget_tokens": 16000},
     "designer":       {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "planner":        {"model": "claude-sonnet-4-6", "provider": "anthropic",  "thinking": True,  "budget_tokens": 10000},
     "tester":         {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "reviewer":       {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "test-generator": {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "scaffolder":     {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
-    "coder":          {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
+    "coder":          {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "qa-tester":      {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "code-reviewer":  {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": True,  "reasoning_effort": "max"},
     "commit":         {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "documentation":  {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
+    "consultant":     {"model": "claude-sonnet-4-6", "provider": "anthropic",  "thinking": True, "budget_tokens": 8000},
 }
 
 MAX_TOOL_ITERATIONS = 30  # fallback when agent not in AGENT_TOOL_ITERATIONS
@@ -44,6 +46,8 @@ AGENT_TOOL_ITERATIONS: dict[str, int] = {
     "scaffolder":     60,
     "coder":          200,
     "qa-tester":      80,
+    "reconciler":     40,
+    "consultant":     30,
     "code-reviewer":  30,
     "commit":         20,
     "documentation":  20,
@@ -62,6 +66,7 @@ AGENT_MAX_CALLS: dict[str, int] = {
     "scaffolder":     2,
     "coder":          5,
     "qa-tester":      3,
+    "reconciler":     5,
     "code-reviewer":  3,
     "commit":         2,
     "documentation":  2,
@@ -81,6 +86,7 @@ AGENT_CONCURRENCY: dict[str, int] = {
     "scaffolder":     1,  # writes to codebase — do not increase
     "coder":          1,  # writes to codebase — do not increase
     "qa-tester":      1,
+    "reconciler":     1,
     "code-reviewer":  1,
     "commit":         1,
     "documentation":  1,
@@ -179,6 +185,16 @@ AGENT_CAPABILITIES: dict[str, dict] = {
                        "run_command"},
         "write_deny": [],          # write_file not in tools, so deny patterns are moot
     },
+
+    # ── reconciler: reads parallel drafts, writes canonical blackboard files ──
+    "reconciler": {
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    "consultant": {
+        "tools":      {"list_files", "read_file", "read_blackboard"},
+        "write_deny": [],
+    },
 }
 
 # Canonical blackboard output files produced by each agent.
@@ -196,4 +212,5 @@ AGENT_OUTPUTS: dict[str, list[str]] = {
     "code-reviewer":  ["code-review.md"],
     "commit":         ["commit.md"],
     "documentation":  ["docs.md", "pr-description.md"],
+    "reconciler":     [],
 }

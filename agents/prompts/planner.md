@@ -86,18 +86,27 @@ Each `**Instruction:**` field is passed verbatim to the Coder or Scaffolder. Wri
 Each instruction must include:
 1. **Exact file path** the agent is responsible for
 2. **Requirement numbers** it fulfils
-3. **Key behavioral constraints** — parse formats, validation rules, return shapes, HTTP status codes, field names, exceptions thrown, edge cases that affect implementation
+3. **Exact public method signatures** — full type-annotated signatures for every public method or exported function the unit exposes. No "implement X" without naming the exact signature. Example: `createCheckin(request: CheckinRequest): Promise<CheckinResponse>` or `Page<CheckinResponse> getCheckins(Long userId, Pageable pageable)`
+4. **Key behavioral constraints** — parse formats, validation rules, return shapes, HTTP status codes, field names, exceptions thrown, edge cases that affect implementation
+5. **Acceptance criteria** — 2–4 bullet points that are directly testable: a passing unit test must demonstrate each one. Phrase them as `"given X, expect Y"` not as prose descriptions.
 
 ```
 ### TICKET-007 — Checkin service implementation
 **Req:** 1.1, 1.2
 **File:** `src/main/java/com/example/service/impl/CheckinServiceImpl.java`
-**Instruction:** Implement CheckinService interface (defined in Batch 1). createCheckin:
-parse `<n> [hr|hrs] #<tag> <activities>`, validate hours 0–24 (reject with CheckinParseException
-→ controller maps to 400 + `{"error": string}`), persist Checkin entity (hours: Double,
-tag: String, activities: String, userId: Long, createdAt: Instant). Req 1.2: decimal hours
-valid (1.5 hr). getCheckins(userId, Pageable): query by userId desc by createdAt,
-return Page<CheckinResponse>.
+**Instruction:** Implement CheckinService interface (defined in Batch 1).
+Signatures:
+  - `CheckinResponse createCheckin(CheckinRequest request)` — parse `<n> [hr|hrs] #<tag> <activities>`;
+    throws CheckinParseException on hours outside 0–24; persists Checkin entity (hours: Double,
+    tag: String, activities: String, userId: Long, createdAt: Instant).
+  - `Page<CheckinResponse> getCheckins(Long userId, Pageable pageable)` — query by userId, ordered
+    desc by createdAt.
+Req 1.2: decimal hours valid (1.5 hr).
+**Acceptance criteria:**
+- Given `"1.5 hr #work coding"`, createCheckin persists hours=1.5, tag="work", activities="coding"
+- Given hours=25, createCheckin throws CheckinParseException
+- Given 3 checkins for userId=1, getCheckins(1, page0size2) returns page of size 2 desc by createdAt
+- Controller maps CheckinParseException → 400 + `{"error": <message>}`
 ```
 
 ## Output format
@@ -124,7 +133,7 @@ Before declaring done, write `checklist/planner.md` to the blackboard:
 - [x] Batch ordering correct — verified no unit in batch N references a batch N+ type
 - [x] TICKET-001 is `.github/workflows/ci.yml` in Batch 1
 - [x] Batch 1 contains only contracts, test env setup, and CI config — no business logic units
-- [x] Every ticket has a complete **Instruction:** field with req refs and behavioral constraints
+- [x] Every ticket has a complete **Instruction:** field with req refs, exact public method signatures, behavioral constraints, and 2–4 testable acceptance criteria
 
 ### What I did
 - <total work unit count and batch count>
