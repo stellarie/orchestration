@@ -576,6 +576,21 @@ def health():
     return {"status": "ok", "anthropic_available": bool(ANTHROPIC_API_KEY)}
 
 
+@app.get("/pipeline/steps")
+def get_pipeline_steps():
+    """Return the PIPELINE_STEPS structure so the frontend can render step groups."""
+    def _serialise(step):
+        if isinstance(step, str):
+            return {"type": "single", "agent": step}
+        if isinstance(step, dict):
+            return {"type": "parallel", "agent": step["agent"],
+                    "count": step.get("count", 1), "reconcile": step.get("reconcile", False)}
+        if isinstance(step, list):
+            return {"type": "fanout", "entries": [_serialise(s) for s in step]}
+        return {}
+    return [_serialise(s) for s in PIPELINE_STEPS]
+
+
 @app.post("/task/init")
 def init_task(req: TaskInitRequest):
     _require_repo(req.repo_path)

@@ -166,6 +166,22 @@
     .ctrl-btn--resume:hover { background: rgba(63,185,80,.25); }
     .ctrl-btn--stop   { background: rgba(248,81,73,.1);  border-color: rgba(248,81,73,.3);  color: var(--red); }
     .ctrl-btn--stop:hover   { background: rgba(248,81,73,.25); }
+    /* ── step group nodes ── */
+    .pg-step-group {
+      border: 1px solid var(--border); border-radius: 7px;
+      margin: 2px 0; overflow: hidden;
+    }
+    .pg-step-group-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 10px; background: var(--surface2);
+      font-size: 11px; font-weight: 600; color: var(--dim);
+      cursor: pointer; user-select: none;
+    }
+    .pg-step-group-header:hover { background: var(--border); }
+    .pg-step-group-header .mi { font-size: 13px; }
+    .pg-step-group-body { padding: 2px 4px 4px; }
+    .pg-step-group-body .pg-node { border-radius: 5px; margin: 2px 0; }
+
     .agent-ctrl { display: flex; gap: 3px; margin-left: auto; }
     .agent-ctrl-btn {
       padding: 2px 5px; border-radius: 4px; font-size: 10px; font-weight: 500;
@@ -646,6 +662,14 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
                           showPrePrompts, agentOverrides, onOverrideChange,
                           isRunning, onAgentControl }) {
   const independents = agentOrder.filter(n => !PIPELINE_SET.has(n) && n !== 'consultant');
+  const [steps,       setSteps]       = useState([]);
+  const [collapsed,   setCollapsed]   = useState({});
+
+  useEffect(() => {
+    fetch(`${API}/pipeline/steps`).then(r => r.json()).then(setSteps).catch(() => {});
+  }, []);
+
+  const toggleCollapse = (key) => setCollapsed(prev => ({...prev, [key]: !prev[key]}));
 
   const renderNode = (name, showSkip = false) => {
     const ag      = agents[name] ?? {};
@@ -702,18 +726,87 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
     `;
   };
 
+  const renderStep = (step, idx) => {
+    if (!step) return null;
+    if (step.type === 'single') {
+      return html`
+        <div key=${idx}>
+          ${renderNode(step.agent, true)}
+          ${idx < steps.length - 1 && html`
+            <div class=${`pg-connector pg-connector--${agents[step.agent]?.status ?? 'idle'}`}>
+              <div class="pg-connector-line"></div><div class="pg-connector-arrow"></div>
+            </div>`}
+        </div>`;
+    }
+    if (step.type === 'parallel') {
+      const key  = `p-${idx}`;
+      const open = !collapsed[key];
+      const instances = Array.from({length: step.count}, (_, i) => `${step.agent}-p${i+1}`);
+      const groupStatus = instances.some(n => agents[n]?.status === 'in_progress' || agents[step.agent]?.status === 'in_progress')
+        ? 'in_progress' : (instances.some(n => agents[n]?.status === 'done') || agents[step.agent]?.status === 'done') ? 'done' : 'idle';
+      return html`
+        <div key=${idx}>
+          <div class="pg-step-group">
+            <div class="pg-step-group-header" onClick=${() => toggleCollapse(key)}>
+              <span class="mi">${open ? 'expand_more' : 'chevron_right'}</span>
+              <span>${step.agent} ×${step.count}</span>
+              ${step.reconcile && html`<span style="color:var(--purple);font-size:10px">+ reconciler</span>`}
+              <span class=${`pg-badge pg-badge--${groupStatus}`} style="margin-left:auto">${LABEL[groupStatus] ?? groupStatus}</span>
+            </div>
+            ${open && html`
+              <div class="pg-step-group-body">
+                ${instances.map(n => renderNode(n, false))}
+                ${step.reconcile && renderNode('reconciler', false)}
+              </div>`}
+          </div>
+          ${idx < steps.length - 1 && html`
+            <div class=${`pg-connector pg-connector--${groupStatus}`}>
+              <div class="pg-connector-line"></div><div class="pg-connector-arrow"></div>
+            </div>`}
+        </div>`;
+    }
+    if (step.type === 'fanout') {
+      const key  = `f-${idx}`;
+      const open = !collapsed[key];
+      const names = step.entries.map(e => e.agent);
+      const groupStatus = names.some(n => agents[n]?.status === 'in_progress') ? 'in_progress'
+        : names.some(n => agents[n]?.status === 'done') ? 'done' : 'idle';
+      return html`
+        <div key=${idx}>
+          <div class="pg-step-group">
+            <div class="pg-step-group-header" onClick=${() => toggleCollapse(key)}>
+              <span class="mi">${open ? 'expand_more' : 'chevron_right'}</span>
+              <span>${names.join(' ‖ ')}</span>
+              <span class=${`pg-badge pg-badge--${groupStatus}`} style="margin-left:auto">${LABEL[groupStatus] ?? groupStatus}</span>
+            </div>
+            ${open && html`
+              <div class="pg-step-group-body">
+                ${names.map(n => renderNode(n, false))}
+              </div>`}
+          </div>
+          ${idx < steps.length - 1 && html`
+            <div class=${`pg-connector pg-connector--${groupStatus}`}>
+              <div class="pg-connector-line"></div><div class="pg-connector-arrow"></div>
+            </div>`}
+        </div>`;
+    }
+    return null;
+  };
+
+  const graphBody = steps.length > 0
+    ? steps.map((step, i) => renderStep(step, i))
+    : PIPELINE_AGENTS.map((name, i) => html`
+        <div key=${i}>
+          ${renderNode(name, true)}
+          ${i < PIPELINE_AGENTS.length - 1 && html`
+            <div class=${`pg-connector pg-connector--${agents[name]?.status ?? 'idle'}`}>
+              <div class="pg-connector-line"></div><div class="pg-connector-arrow"></div>
+            </div>`}
+        </div>`);
+
   return html`
     <div class="pipeline-graph">
-      ${PIPELINE_AGENTS.map((name, i) => html`
-        ${renderNode(name, true)}
-        ${i < PIPELINE_AGENTS.length - 1 && html`
-          <div class=${`pg-connector pg-connector--${agents[name]?.status ?? 'idle'}`}>
-            <div class="pg-connector-line"></div>
-            <div class="pg-connector-arrow"></div>
-          </div>
-        `}
-      `)}
-
+      ${graphBody}
       ${independents.length > 0 && html`
         <div class="pg-section-label">Independent</div>
         ${independents.map(name => renderNode(name, false))}
