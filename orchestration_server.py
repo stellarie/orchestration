@@ -4,7 +4,10 @@ import logging
 import time
 import threading
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field as dc_field
+from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -13,7 +16,7 @@ from pydantic import BaseModel
 
 from logging_config import setup_logging
 from blackboard import BlackBoard
-from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY
+from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, AGENT_OUTPUTS
 from event_bus import bus, interrupt_bus
 from validators import validate_agent_output
 
@@ -32,6 +35,8 @@ from agents.qa_tester import QATesterAgent
 from agents.code_reviewer import CodeReviewerAgent
 from agents.commit import CommitAgent
 from agents.documentation import DocumentationAgent
+from agents.reconciler import ReconcilerAgent
+from agents.consultant import ConsultantAgent
 
 AGENT_MAP = {
     "architect":      ArchitectAgent,
@@ -46,6 +51,8 @@ AGENT_MAP = {
     "code-reviewer":  CodeReviewerAgent,
     "commit":         CommitAgent,
     "documentation":  DocumentationAgent,
+    "reconciler":     ReconcilerAgent,
+    "consultant":     ConsultantAgent,
 }
 
 app = FastAPI(title="Orchestration Server", version="0.1.0")
@@ -72,8 +79,9 @@ class BatchTask(BaseModel):
 
 
 class RunBatchRequest(BaseModel):
-    repo_path: str
-    tasks:     list[BatchTask]
+    repo_path:     str
+    tasks:         list[BatchTask]
+    force_deepseek: bool = False  # True = auto mode (all DeepSeek)
 
 
 class TaskInitRequest(BaseModel):
@@ -91,12 +99,332 @@ class BlackboardWriteRequest(BaseModel):
 class PipelineRunRequest(BaseModel):
     repo_path:   str
     description: str
+    skip_agents: list[str] = []
 
 
-PIPELINE_ORDER = [
-    "architect", "designer", "planner", "scaffolder", "tester", "reviewer",
-    "test-generator", "coder", "qa-tester", "code-reviewer", "commit", "documentation",
+class PipelineResumeRequest(BaseModel):
+    repo_path:   str
+    skip_agents: list[str] = []
+
+
+class ConsultantAskRequest(BaseModel):
+    message:          str
+    project_repo_path: str = ""  # optional; injected into instruction for blackboard context
+
+
+class PipelineQueueRequest(BaseModel):
+    repo_path:       str
+    description:     str
+    skip_agents:     list[str] = []
+    agent_overrides: dict[str, str] = {}  # agent_name → extra instruction prepended at run-time
+
+
+class PipelineUpdateRequest(BaseModel):
+    pipeline_id:     str
+    skip_agents:     list[str] = []
+    agent_overrides: dict[str, str] = {}
+
+
+# ── Pipeline registry ────────────────────────────────────────────────────────
+
+@dataclass
+class PipelineEntry:
+    pipeline_id:     str
+    repo_path:       str
+    task_desc:       str
+    status:          str  # 'running' | 'queued' | 'done' | 'failed'
+    skip_agents:     set  = dc_field(default_factory=set)
+    agent_overrides: dict = dc_field(default_factory=dict)
+    created_at:      str  = dc_field(default_factory=lambda: datetime.now().isoformat())
+
+
+_pipeline_registry: dict[str, PipelineEntry] = {}
+_pipeline_queues:   dict[str, list]           = {}   # repo_path → ordered list of queued pipeline_ids
+_reg_lock = threading.Lock()
+
+
+def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data: str = ""):
+    bus.emit({
+        "type":        event_type,
+        "pipeline_id": pipeline_id,
+        "repo_path":   repo_path,
+        "agent":       "",
+        "data":        data,
+        "ts":          datetime.now().isoformat(),
+    })
+
+
+def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
+    """Wrapper that runs a pipeline and handles queue advancement on finish."""
+    try:
+        _run_pipeline_steps(
+            entry.repo_path, entry.task_desc, start_step,
+            entry.skip_agents, entry.pipeline_id, entry.agent_overrides,
+        )
+        final = "done"
+    except Exception:
+        logger.exception("[pipeline] %s crashed", entry.pipeline_id)
+        final = "failed"
+
+    with _reg_lock:
+        if entry.pipeline_id in _pipeline_registry:
+            _pipeline_registry[entry.pipeline_id].status = final
+
+    _emit_pipeline_event("pipeline_status", entry.pipeline_id, entry.repo_path, final)
+    _start_next_queued(entry.repo_path)
+
+
+def _start_next_queued(repo_path: str):
+    """Pop the first queued pipeline for repo_path and start it."""
+    with _reg_lock:
+        queue = _pipeline_queues.get(repo_path, [])
+        next_entry = None
+        for pid in list(queue):
+            e = _pipeline_registry.get(pid)
+            if e and e.status == "queued":
+                e.status = "running"
+                _pipeline_queues[repo_path] = [p for p in queue if p != pid]
+                next_entry = e
+                break
+    if not next_entry:
+        return
+
+    bb = BlackBoard(next_entry.repo_path)
+    bb.init_task(next_entry.pipeline_id, next_entry.task_desc)
+    bb.write("run-id",        next_entry.pipeline_id)
+    bb.write("pipeline-step", "0")
+    _emit_pipeline_event("pipeline_status", next_entry.pipeline_id, next_entry.repo_path, "running")
+
+    threading.Thread(
+        target=_run_pipeline_with_cleanup,
+        args=(next_entry,),
+        daemon=True,
+        name=f"pipeline-{next_entry.pipeline_id}",
+    ).start()
+
+
+# Pipeline step schema:
+#   str                                  → single agent, once
+#   {"agent": str, "count": int,
+#    "reconcile": bool}                  → N parallel instances of same agent;
+#                                          reconciler runs after if reconcile=True
+#   [str | dict, ...]                    → fan-out group: all entries run in parallel
+#                                          (mixed agents OK, reconcilers per-entry)
+PIPELINE_STEPS = [
+    {"agent": "architect",      "count": 3, "reconcile": True},
+    "designer",
+    "planner",
+    "scaffolder",
+    "tester",
+    [
+        {"agent": "reviewer",       "count": 2, "reconcile": True},
+        {"agent": "test-generator", "count": 1, "reconcile": False},
+    ],
+    "coder",
+    ["qa-tester", "code-reviewer"],
+    "commit",
+    "documentation",
 ]
+
+
+def _step_agent_names(step) -> list[str]:
+    """Flat list of agent names involved in a step (including reconciler where relevant)."""
+    if isinstance(step, str):
+        return [step]
+    if isinstance(step, dict):
+        names = [step["agent"]]
+        if step.get("reconcile") and step.get("count", 1) > 1:
+            names.append("reconciler")
+        return names
+    if isinstance(step, list):
+        result = []
+        for s in step:
+            result.extend(_step_agent_names(s))
+        return result
+    return []
+
+
+def _determine_angles(task_description: str) -> list[str]:
+    """Quick non-agentic call to get 3 complementary architect angles for the task."""
+    import json as _json
+    from openai import OpenAI
+    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-v4-pro",
+            messages=[{"role": "user", "content": (
+                "For this software task, suggest exactly 3 complementary, non-overlapping "
+                "architect analysis angles. Return ONLY a JSON array of 3 short strings "
+                "(each under 12 words). No explanation, no markdown, just the array.\n\n"
+                f"Task: {task_description}"
+            )}],
+            max_tokens=150,
+        )
+        text = resp.choices[0].message.content.strip()
+        if "```" in text:
+            text = text.split("```")[1].lstrip("json\n").split("```")[0]
+        return _json.loads(text)[:3]
+    except Exception:
+        logger.warning("[pipeline] angle determination failed, using defaults")
+        return [
+            "technical architecture, data model, and tech stack",
+            "domain logic, user-facing features, and workflows",
+            "reliability, edge cases, performance, and constraints",
+        ]
+
+
+def _run_pipeline_steps(
+    repo_path:       str,
+    task_description: str,
+    start_step:      int  = 0,
+    skip_agents:     set  | None = None,
+    pipeline_id:     str  = "",
+    agent_overrides: dict | None = None,
+):
+    """Execute PIPELINE_STEPS from start_step. Called in a background thread."""
+    skip_agents     = skip_agents or set()
+    agent_overrides = agent_overrides or {}
+    bb              = BlackBoard(repo_path)
+    base_instr      = (
+        "Complete your pipeline role. "
+        "The task is described in .blackboard/task.md. "
+        "Read all relevant blackboard files from previous pipeline steps before acting."
+    )
+
+    def _wait_if_active(agent_name: str):
+        while agent_name in interrupt_bus.active():
+            logger.info("[pipeline] waiting for %s to finish independent run", agent_name)
+            time.sleep(2)
+
+    def _run_one(agent_name: str, instruction: str, force_ds: bool, suffix: str = "") -> str:
+        _wait_if_active(agent_name)
+        override = agent_overrides.get(agent_name, "").strip()
+        if override:
+            instruction = f"{override}\n\n---\n\n{instruction}"
+        bb.update_status(agent_name, "in_progress", increment_iteration=True)
+        try:
+            agent  = AGENT_MAP[agent_name](repo_path, force_deepseek=force_ds, pipeline_id=pipeline_id)
+            result = agent.run(instruction, output_suffix=suffix)
+            status = "done" if result["status"] == "success" else "failed"
+        except Exception:
+            logger.exception("[pipeline] agent=%s crashed", agent_name)
+            status = "failed"
+        bb.update_status(agent_name, status)
+        return status
+
+    def _reconcile(agent_name: str, count: int, angles: list | None = None) -> str:
+        outputs = AGENT_OUTPUTS.get(agent_name, [])
+        if not outputs:
+            return "done"
+        drafts = [
+            f"{Path(o).stem}-p{i+1}{Path(o).suffix}"
+            for o in outputs for i in range(count)
+        ]
+        instr = (
+            f"Reconcile the parallel {agent_name} outputs into a single authoritative result.\n"
+            f"Read drafts from the blackboard: {', '.join(drafts)}\n"
+            f"Write canonical files to the blackboard: {', '.join(outputs)}\n"
+            f"Be opinionated: resolve every conflict, fill every gap, eliminate all ambiguity."
+        )
+        if angles:
+            instr += f"\n\nAngles covered by the drafts: {angles}"
+        return _run_one("reconciler", instr, force_ds=False)  # always use Anthropic
+
+    def _check_sendback(agent_name: str):
+        content = bb.read(f"retry-request/{agent_name}.md")
+        if not content or content.startswith("["):
+            return
+        lines   = content.strip().splitlines()
+        target  = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("TARGET:")), None)
+        if not target or target not in AGENT_MAP:
+            return
+        issues  = "\n".join(l for l in lines if not l.startswith("TARGET:")).strip()
+        logger.info("[pipeline] send-back: %s → %s", agent_name, target)
+        bb.write(f"retry-request/{agent_name}.md", "")
+        _run_one(target, f"Rework requested by {agent_name}:\n\n{issues}", True)
+
+    angles_cache: list | None = None
+
+    for step_idx, step in enumerate(PIPELINE_STEPS[start_step:], start=start_step):
+        # Skip step if every non-reconciler agent in it is in the skip list
+        step_names = [n for n in _step_agent_names(step) if n != "reconciler"]
+        if step_names and all(n in skip_agents for n in step_names):
+            logger.info("[pipeline] skipping step %d: %s", step_idx, step)
+            bb.write("pipeline-step", str(step_idx + 1))
+            continue
+
+        logger.info("[pipeline] step %d: %s", step_idx, step)
+
+        if isinstance(step, str):
+            # ── single agent ────────────────────────────────────────────────
+            status = _run_one(step, base_instr, True)
+            _check_sendback(step)
+            if status == "failed":
+                logger.warning("[pipeline] stopping at step %d (%s)", step_idx, step)
+                return
+
+        elif isinstance(step, dict):
+            # ── N parallel instances of same agent ───────────────────────────
+            agent_name = step["agent"]
+            count      = step.get("count", 1)
+            reconcile  = step.get("reconcile", False)
+
+            if count == 1:
+                status = _run_one(agent_name, base_instr, True)
+                _check_sendback(agent_name)
+                if status == "failed":
+                    return
+            else:
+                if agent_name == "architect":
+                    angles_cache = _determine_angles(task_description)
+                    instrs = [f"{base_instr}\n\nYour analysis angle: {a}" for a in angles_cache]
+                else:
+                    instrs = [base_instr] * count
+
+                with ThreadPoolExecutor(max_workers=count) as pool:
+                    futures  = [pool.submit(_run_one, agent_name, instrs[i], True, f"-p{i+1}") for i in range(count)]
+                    statuses = [f.result() for f in futures]
+
+                if any(s == "failed" for s in statuses):
+                    logger.warning("[pipeline] parallel %s had failures", agent_name)
+                    return
+
+                if reconcile:
+                    status = _reconcile(agent_name, count, angles_cache if agent_name == "architect" else None)
+                    if status == "failed":
+                        return
+
+        elif isinstance(step, list):
+            # ── fan-out group (different agents / entries) ───────────────────
+            tasks = [s if isinstance(s, dict) else {"agent": s, "count": 1, "reconcile": False} for s in step]
+            max_w = sum(t.get("count", 1) for t in tasks)
+
+            with ThreadPoolExecutor(max_workers=max_w) as pool:
+                futures = []
+                for t in tasks:
+                    agent_name = t["agent"]
+                    count      = t.get("count", 1)
+                    for i in range(count):
+                        suffix = f"-p{i+1}" if count > 1 else ""
+                        futures.append((t, pool.submit(_run_one, agent_name, base_instr, True, suffix)))
+
+                results = [(t, f.result()) for t, f in futures]
+
+            if any(status == "failed" for _, status in results):
+                logger.warning("[pipeline] fan-out group had failures at step %d", step_idx)
+                return
+
+            # Reconcile entries that need it
+            for t in tasks:
+                if t.get("reconcile") and t.get("count", 1) > 1:
+                    status = _reconcile(t["agent"], t["count"])
+                    if status == "failed":
+                        return
+
+            for t in tasks:
+                _check_sendback(t["agent"])
+
+        bb.write("pipeline-step", str(step_idx + 1))
 
 
 # ── endpoints ────────────────────────────────────────────────────────────────
@@ -163,47 +491,180 @@ def run_agent(req: RunRequest):
 
 @app.post("/pipeline/run")
 def pipeline_run(req: PipelineRunRequest):
-    """Start the full 12-agent pipeline in a background thread.
+    """Start the full pipeline in a background thread (full-auto, all DeepSeek).
 
-    All agents run with force_deepseek=True (full-auto mode).
     Returns immediately; progress arrives via /stream SSE.
     """
     _require_repo(req.repo_path)
-    task_id = str(uuid.uuid4())[:8]
-    bb      = BlackBoard(req.repo_path)
-    bb.init_task(task_id, req.description)
-    bb.write("run-id", task_id)
-
-    instr = (
-        "Complete your pipeline role. "
-        "The task is described in .blackboard/task.md. "
-        "Read all relevant blackboard files from previous pipeline steps before acting."
+    pipeline_id = str(uuid.uuid4())[:8]
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=req.description,
+        status="running",
+        skip_agents=set(req.skip_agents),
     )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
 
-    def _run_pipeline():
-        for agent_name in PIPELINE_ORDER:
-            # If this agent was activated independently, wait for it to finish
-            # before running the pipeline step — it finishes its task first.
-            import time as _time
-            while agent_name in interrupt_bus.active():
-                logger.info("[pipeline] waiting for %s to finish independent run", agent_name)
-                _time.sleep(2)
+    bb = BlackBoard(req.repo_path)
+    bb.init_task(pipeline_id, req.description)
+    bb.write("run-id",        pipeline_id)
+    bb.write("pipeline-step", "0")
 
-            try:
-                bb.update_status(agent_name, "in_progress", increment_iteration=True)
-                agent  = AGENT_MAP[agent_name](req.repo_path, force_deepseek=True)
-                result = agent.run(instr)
-                status = "done" if result["status"] == "success" else "failed"
-            except Exception:
-                logger.exception("[pipeline] agent=%s crashed", agent_name)
-                status = "failed"
-            bb.update_status(agent_name, status)
-            if status == "failed":
-                logger.warning("[pipeline] stopping at agent=%s", agent_name)
-                break
+    _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
 
-    threading.Thread(target=_run_pipeline, daemon=True, name=f"pipeline-{task_id}").start()
-    return {"task_id": task_id, "status": "started"}
+    threading.Thread(
+        target=_run_pipeline_with_cleanup,
+        args=(entry,),
+        daemon=True,
+        name=f"pipeline-{pipeline_id}",
+    ).start()
+    return {"pipeline_id": pipeline_id, "task_id": pipeline_id, "status": "started"}
+
+
+@app.post("/pipeline/resume")
+def pipeline_resume(req: PipelineResumeRequest):
+    """Resume a pipeline that stopped partway through.
+
+    Reads the last completed step index and task description from the blackboard,
+    then continues from the next step.
+    """
+    _require_repo(req.repo_path)
+    bb = BlackBoard(req.repo_path)
+
+    task_desc = bb.read("task.md") or ""
+    if not task_desc:
+        raise HTTPException(400, "No task found in blackboard — start a new run instead")
+
+    raw_step  = bb.read("pipeline-step") or "0"
+    try:
+        start_step = int(raw_step.strip())
+    except ValueError:
+        start_step = 0
+
+    if start_step >= len(PIPELINE_STEPS):
+        return {"status": "already_complete", "step": start_step}
+
+    pipeline_id = str(uuid.uuid4())[:8]
+    logger.info("[pipeline/resume] resuming from step %d", start_step)
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=task_desc,
+        status="running",
+        skip_agents=set(req.skip_agents),
+    )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
+
+    _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
+
+    threading.Thread(
+        target=_run_pipeline_with_cleanup,
+        args=(entry, start_step),
+        daemon=True,
+        name=f"pipeline-resume-{pipeline_id}",
+    ).start()
+    return {"pipeline_id": pipeline_id, "task_id": pipeline_id, "status": "resumed", "from_step": start_step}
+
+
+@app.post("/consultant/ask")
+def consultant_ask(req: ConsultantAskRequest):
+    """Activate the consultant with optional project context.
+
+    The consultant always runs from the orchestration directory so it can
+    read the pipeline source code. The project blackboard path is injected
+    into the instruction so it can reference it with absolute paths.
+    """
+    orchestration_path = str(Path(__file__).parent)
+
+    instruction = req.message
+    preamble_lines = [
+        f"Orchestration directory (your working base): {orchestration_path}",
+        f"IMPORTANT: All tool calls require ABSOLUTE paths.",
+        f"  • To browse orchestration code: list_files(\"{orchestration_path}\")",
+    ]
+    if req.project_repo_path:
+        preamble_lines += [
+            f"  • To browse the user's project:  list_files(\"{req.project_repo_path}\")",
+            f"  • Project blackboard:             list_files(\"{req.project_repo_path}/.blackboard\")",
+        ]
+    instruction = "\n".join(preamble_lines) + f"\n\n---\n\n{req.message}"
+
+    if "consultant" in interrupt_bus.active():
+        result = interrupt_bus.send("consultant", instruction)
+        return {"agent": "consultant", "status": "queued", **result}
+
+    bb = BlackBoard(orchestration_path)
+    bb.update_status("consultant", "in_progress", increment_iteration=True)
+
+    def _run():
+        try:
+            agent  = ConsultantAgent(orchestration_path)
+            result = agent.run(instruction)
+            status = "done" if result["status"] == "success" else "failed"
+        except Exception:
+            logger.exception("[consultant] crashed")
+            status = "failed"
+        bb.update_status("consultant", status)
+
+    threading.Thread(target=_run, daemon=True, name="consultant").start()
+    return {"agent": "consultant", "status": "started"}
+
+
+@app.post("/pipeline/queue")
+def pipeline_queue(req: PipelineQueueRequest):
+    """Queue a pipeline to run after the current one on the same repo finishes."""
+    _require_repo(req.repo_path)
+    pipeline_id = str(uuid.uuid4())[:8]
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=req.description,
+        status="queued",
+        skip_agents=set(req.skip_agents),
+        agent_overrides=req.agent_overrides,
+    )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
+        _pipeline_queues.setdefault(req.repo_path, []).append(pipeline_id)
+        position = len(_pipeline_queues[req.repo_path])
+
+    _emit_pipeline_event("pipeline_queued", pipeline_id, req.repo_path, req.description[:60])
+    return {"pipeline_id": pipeline_id, "status": "queued", "position": position}
+
+
+@app.patch("/pipeline/update")
+def pipeline_update(req: PipelineUpdateRequest):
+    """Update skip_agents and agent_overrides on a queued pipeline."""
+    with _reg_lock:
+        entry = _pipeline_registry.get(req.pipeline_id)
+        if not entry:
+            raise HTTPException(404, f"Pipeline '{req.pipeline_id}' not found")
+        if entry.status != "queued":
+            raise HTTPException(400, "Can only update queued pipelines")
+        entry.skip_agents    = set(req.skip_agents)
+        entry.agent_overrides = req.agent_overrides
+    return {"status": "updated"}
+
+
+@app.get("/pipelines")
+def list_pipelines():
+    """Return all known pipelines (running, queued, done, failed)."""
+    with _reg_lock:
+        return [
+            {
+                "pipeline_id":     e.pipeline_id,
+                "repo_path":       e.repo_path,
+                "task_desc":       e.task_desc,
+                "status":          e.status,
+                "skip_agents":     list(e.skip_agents),
+                "agent_overrides": e.agent_overrides,
+                "created_at":      e.created_at,
+            }
+            for e in _pipeline_registry.values()
+        ]
 
 
 @app.post("/run-batch")
@@ -235,7 +696,7 @@ def run_batch(req: RunBatchRequest):
             idx + 1, n, task.agent, suffix, tname,
         )
         bb.update_status(task.agent, "in_progress", increment_iteration=True)
-        agent  = AGENT_MAP[task.agent](req.repo_path)
+        agent  = AGENT_MAP[task.agent](req.repo_path, force_deepseek=req.force_deepseek)
         result = agent.run(task.instruction, resume_session=False, output_suffix=suffix)
 
         final_status = "done" if result["status"] == "success" else "failed"
@@ -291,7 +752,9 @@ async def stream_events(repo_path: str = ""):
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=25)
-                    if repo_path and event.get("repo_path") not in ("", repo_path):
+                    if (repo_path
+                            and event.get("repo_path") not in ("", repo_path)
+                            and event.get("agent") != "consultant"):
                         continue
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
