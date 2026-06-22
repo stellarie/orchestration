@@ -28,7 +28,13 @@ MODELS = {
     "commit":         {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "documentation":  {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "consultant":     {"model": "claude-sonnet-4-6", "provider": "anthropic",  "thinking": True, "budget_tokens": 8000},
-    "judge":          {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
+    "judge":               {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
+    # ── research pipeline — all get maximum budget so nothing gets missed ──────
+    "query-planner":       {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "searcher":            {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "reader":              {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "tech-auditor":        {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "research-synthesizer":{"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
 }
 
 MAX_TOOL_ITERATIONS = 30  # fallback when agent not in AGENT_TOOL_ITERATIONS
@@ -52,7 +58,12 @@ AGENT_TOOL_ITERATIONS: dict[str, int] = {
     "code-reviewer":  30,
     "commit":         20,
     "documentation":  20,
-    "judge":          15,
+    "judge":               15,
+    "query-planner":       20,
+    "searcher":            40,
+    "reader":              40,
+    "tech-auditor":        30,
+    "research-synthesizer":30,
 }
 
 # Max times the orchestrator may invoke the same agent across the whole pipeline run.
@@ -199,6 +210,27 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     },
     "judge": {
         "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    # ── research agents — web tools + blackboard write ────────────────────────
+    "query-planner": {
+        "tools":      {"read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    "searcher": {
+        "tools":      {"read_blackboard", "write_blackboard", "web_search"},
+        "write_deny": [],
+    },
+    "reader": {
+        "tools":      {"read_blackboard", "write_blackboard", "fetch_url"},
+        "write_deny": [],
+    },
+    "tech-auditor": {
+        "tools":      {"read_blackboard", "write_blackboard", "web_search", "fetch_url"},
+        "write_deny": [],
+    },
+    "research-synthesizer": {
+        "tools":      {"read_blackboard", "write_blackboard"},
         "write_deny": [],
     },
 }

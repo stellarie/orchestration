@@ -38,6 +38,11 @@ from agents.documentation import DocumentationAgent
 from agents.reconciler import ReconcilerAgent
 from agents.consultant import ConsultantAgent
 from agents.judge import JudgeAgent
+from agents.query_planner import QueryPlannerAgent
+from agents.searcher import SearcherAgent
+from agents.reader import ReaderAgent
+from agents.tech_auditor import TechAuditorAgent
+from agents.research_synthesizer import ResearchSynthesizerAgent
 
 AGENT_MAP = {
     "architect":      ArchitectAgent,
@@ -54,7 +59,12 @@ AGENT_MAP = {
     "documentation":  DocumentationAgent,
     "reconciler":     ReconcilerAgent,
     "consultant":     ConsultantAgent,
-    "judge":          JudgeAgent,
+    "judge":               JudgeAgent,
+    "query-planner":       QueryPlannerAgent,
+    "searcher":            SearcherAgent,
+    "reader":              ReaderAgent,
+    "tech-auditor":        TechAuditorAgent,
+    "research-synthesizer":ResearchSynthesizerAgent,
 }
 
 app = FastAPI(title="Orchestration Server", version="0.1.0")
@@ -134,6 +144,13 @@ class PipelineControlRequest(BaseModel):
 
 class AgentControlRequest(BaseModel):
     action: str  # "skip" | "restart" | "pause"
+
+
+class ResearchRunRequest(BaseModel):
+    repo_path:        str
+    description:      str
+    queue_dev:        bool = False   # auto-queue dev pipeline after research finishes
+    dev_description:  str  = ""      # task for the queued dev pipeline (defaults to description)
 
 
 # ── Pipeline registry ────────────────────────────────────────────────────────
@@ -285,6 +302,15 @@ PIPELINE_STEPS = [
 ]
 
 
+RESEARCH_PIPELINE_STEPS = [
+    "query-planner",
+    {"agent": "searcher",  "count": 3, "reconcile": False},
+    {"agent": "reader",    "count": 3, "reconcile": False},
+    "tech-auditor",
+    "research-synthesizer",
+]
+
+
 def _step_agent_names(step) -> list[str]:
     """Flat list of agent names involved in a step (including reconciler where relevant)."""
     if isinstance(step, str):
@@ -338,8 +364,10 @@ def _run_pipeline_steps(
     skip_agents:     set  | None = None,
     pipeline_id:     str  = "",
     agent_overrides: dict | None = None,
+    steps_override:  list | None = None,
 ):
-    """Execute PIPELINE_STEPS from start_step. Called in a background thread."""
+    """Execute PIPELINE_STEPS (or steps_override) from start_step. Called in a background thread."""
+    STEPS = steps_override if steps_override is not None else PIPELINE_STEPS
     skip_agents     = skip_agents or set()
     agent_overrides = agent_overrides or {}
     bb              = BlackBoard(repo_path)
@@ -481,7 +509,7 @@ def _run_pipeline_steps(
 
     angles_cache: list | None = None
 
-    for step_idx, step in enumerate(PIPELINE_STEPS[start_step:], start=start_step):
+    for step_idx, step in enumerate(STEPS[start_step:], start=start_step):
         # Skip step if every non-reconciler agent in it is in the skip list
         step_names = [n for n in _step_agent_names(step) if n != "reconciler"]
         if step_names and all(n in skip_agents for n in step_names):
@@ -724,6 +752,68 @@ def pipeline_resume(req: PipelineResumeRequest):
         name=f"pipeline-resume-{pipeline_id}",
     ).start()
     return {"pipeline_id": pipeline_id, "task_id": pipeline_id, "status": "resumed", "from_step": start_step}
+
+
+@app.post("/research/run")
+def research_run(req: ResearchRunRequest):
+    """Run the research pipeline, optionally queuing a dev pipeline after."""
+    _ensure_repo(req.repo_path)
+    pipeline_id = str(uuid.uuid4())[:8]
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=req.description,
+        status="running",
+    )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
+
+    bb = BlackBoard(req.repo_path)
+    bb.init_task(pipeline_id, req.description)
+    bb.write("run-id",        pipeline_id)
+    bb.write("pipeline-step", "0")
+    _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
+
+    dev_pid = None
+    if req.queue_dev:
+        dev_pid = str(uuid.uuid4())[:8]
+        dev_desc = req.dev_description or req.description
+        dev_entry = PipelineEntry(
+            pipeline_id=dev_pid,
+            repo_path=req.repo_path,
+            task_desc=dev_desc,
+            status="queued",
+            source_pipeline_id=pipeline_id,
+        )
+        with _reg_lock:
+            _pipeline_registry[dev_pid] = dev_entry
+            _pipeline_queues.setdefault(req.repo_path, []).append(dev_pid)
+        _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
+
+    def _run_research():
+        try:
+            _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
+                                steps_override=RESEARCH_PIPELINE_STEPS)
+            final = "done"
+        except Exception:
+            logger.exception("[research] %s crashed", pipeline_id)
+            final = "failed"
+        with _reg_lock:
+            if pipeline_id in _pipeline_registry:
+                _pipeline_registry[pipeline_id].status = final
+        if final == "done":
+            try:
+                _write_handoff(entry)
+            except Exception:
+                pass
+        _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, final)
+        _start_next_queued(req.repo_path)
+
+    threading.Thread(target=_run_research, daemon=True, name=f"research-{pipeline_id}").start()
+    result = {"pipeline_id": pipeline_id, "status": "started"}
+    if dev_pid:
+        result["dev_pipeline_id"] = dev_pid
+    return result
 
 
 @app.post("/consultant/ask")

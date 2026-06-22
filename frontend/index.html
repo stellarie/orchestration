@@ -550,9 +550,12 @@ const PIPELINE_SET = new Set(PIPELINE_AGENTS);
 // ── PipelineModal (new run + queue) ─────────────────────────────────────────
 
 function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated }) {
-  const isQueue = mode === 'queue';
+  const isQueue    = mode === 'queue';
+  const isResearch = mode === 'research';
   const [repo,        setRepo]        = useState(defaultRepo ?? '');
   const [desc,        setDesc]        = useState('');
+  const [devDesc,     setDevDesc]     = useState('');
+  const [queueDev,    setQueueDev]    = useState(true);
   const [skipped,     setSkipped]     = useState(new Set());
   const [overrides,   setOverrides]   = useState({});
   const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
@@ -567,14 +570,21 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
     if (!repo.trim() || !desc.trim()) return;
     setBusy(true); setStatus('');
     try {
-      const endpoint = isQueue ? '/pipeline/queue' : '/pipeline/run';
-      const body = {
-        repo_path:   repo.trim(),
-        description: desc.trim(),
-        skip_agents: [...skipped],
-        ...(isQueue && { agent_overrides: overrides }),
-        ...(isQueue && passOutputs && sourcePipelineId && { source_pipeline_id: sourcePipelineId }),
-      };
+      let endpoint, body;
+      if (isResearch) {
+        endpoint = '/research/run';
+        body = { repo_path: repo.trim(), description: desc.trim(),
+                 queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim() };
+      } else {
+        endpoint = isQueue ? '/pipeline/queue' : '/pipeline/run';
+        body = {
+          repo_path:   repo.trim(),
+          description: desc.trim(),
+          skip_agents: [...skipped],
+          ...(isQueue && { agent_overrides: overrides }),
+          ...(isQueue && passOutputs && sourcePipelineId && { source_pipeline_id: sourcePipelineId }),
+        };
+      }
       const r = await fetch(`${API}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -591,7 +601,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
   return html`
     <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
       <div class="modal" style="max-height:90vh;overflow-y:auto">
-        <div class="modal-title">${isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
+        <div class="modal-title">${isResearch ? 'Research + Dev' : isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
 
         <div class="modal-field">
           <label>REPO PATH</label>
@@ -600,20 +610,38 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
         </div>
 
         <div class="modal-field">
-          <label>TASK DESCRIPTION</label>
-          <textarea placeholder="Describe what you want to build or change…"
+          <label>${isResearch ? 'RESEARCH TOPIC' : 'TASK DESCRIPTION'}</label>
+          <textarea placeholder=${isResearch ? 'What to research — tech stack, libraries, version requirements…' : 'Describe what you want to build or change…'}
             value=${desc} onInput=${e => setDesc(e.target.value)} onKeyDown=${onKey}></textarea>
         </div>
 
-        <div class="modal-field">
-          <label>SKIP AGENTS</label>
-          <div class="skip-chips">
-            ${PIPELINE_AGENTS.map(n => html`
-              <button key=${n} class=${`skip-chip${skipped.has(n) ? ' active' : ''}`}
-                onClick=${() => toggleSkip(n)}>${n}</button>
-            `)}
+        ${isResearch && html`
+          <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
+            <label style="margin:0;white-space:nowrap">AUTO-QUEUE DEV PIPELINE</label>
+            <input type="checkbox" checked=${queueDev}
+              onChange=${e => setQueueDev(e.target.checked)}
+              style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue)" />
           </div>
-        </div>
+          ${queueDev && html`
+            <div class="modal-field">
+              <label>DEV TASK (optional, defaults to research topic)</label>
+              <textarea placeholder="What to build after research completes…"
+                value=${devDesc} onInput=${e => setDevDesc(e.target.value)}></textarea>
+            </div>
+          `}
+        `}
+
+        ${!isResearch && html`
+          <div class="modal-field">
+            <label>SKIP AGENTS</label>
+            <div class="skip-chips">
+              ${PIPELINE_AGENTS.map(n => html`
+                <button key=${n} class=${`skip-chip${skipped.has(n) ? ' active' : ''}`}
+                  onClick=${() => toggleSkip(n)}>${n}</button>
+              `)}
+            </div>
+          </div>
+        `}
 
         ${isQueue && sourcePipelineId && html`
           <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
@@ -1015,7 +1043,7 @@ function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
 
 // ── TabBar ────────────────────────────────────────────────────────────────────
 
-function TabBar({ pipelines, activeTab, onSelect, onNew }) {
+function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch }) {
   return html`
     <div class="tab-bar">
       <button class=${`tab-btn${activeTab === 'overview' ? ' active' : ''}`} onClick=${() => onSelect('overview')}>
@@ -1030,6 +1058,10 @@ function TabBar({ pipelines, activeTab, onSelect, onNew }) {
       `)}
       <button class="tab-btn tab-btn--add" onClick=${onNew} title="New pipeline">
         <span class="mi mi-sm">add</span>
+      </button>
+      <button class="tab-btn tab-btn--add" onClick=${onResearch} title="Research + Dev pipeline"
+        style="color:var(--purple);gap:3px">
+        <span class="mi mi-sm">travel_explore</span>
       </button>
     </div>
   `;
@@ -1448,6 +1480,7 @@ function App() {
         activeTab=${activeTab}
         onSelect=${setActiveTab}
         onNew=${() => setShowModal({mode: 'new', defaultRepo})}
+        onResearch=${() => setShowModal({mode: 'research', defaultRepo})}
       />
 
       <div class="tab-content">
