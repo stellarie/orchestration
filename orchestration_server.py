@@ -156,6 +156,7 @@ def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data
 
 def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
     """Wrapper that runs a pipeline and handles queue advancement on finish."""
+    _ensure_repo(entry.repo_path, entry.pipeline_id, entry.repo_path)
     try:
         _run_pipeline_steps(
             entry.repo_path, entry.task_desc, start_step,
@@ -495,7 +496,7 @@ def pipeline_run(req: PipelineRunRequest):
 
     Returns immediately; progress arrives via /stream SSE.
     """
-    _require_repo(req.repo_path)
+    _ensure_repo(req.repo_path)
     pipeline_id = str(uuid.uuid4())[:8]
     entry = PipelineEntry(
         pipeline_id=pipeline_id,
@@ -616,7 +617,7 @@ def consultant_ask(req: ConsultantAskRequest):
 @app.post("/pipeline/queue")
 def pipeline_queue(req: PipelineQueueRequest):
     """Queue a pipeline to run after the current one on the same repo finishes."""
-    _require_repo(req.repo_path)
+    _ensure_repo(req.repo_path)
     pipeline_id = str(uuid.uuid4())[:8]
     entry = PipelineEntry(
         pipeline_id=pipeline_id,
@@ -865,6 +866,16 @@ def get_status(repo_path: str):
 def _require_repo(path: str):
     if not Path(path).exists():
         raise HTTPException(400, f"Repo path does not exist: {path}")
+
+
+def _ensure_repo(path: str, pipeline_id: str = "", repo_path: str = ""):
+    """Create repo_path if missing, emitting a warning event so the user knows."""
+    p = Path(path)
+    if not p.exists():
+        p.mkdir(parents=True, exist_ok=True)
+        if pipeline_id:
+            _emit_pipeline_event("warning", pipeline_id, repo_path or path,
+                                 f"Directory did not exist and was created: {path}")
 
 
 # ── entry point ──────────────────────────────────────────────────────────────
