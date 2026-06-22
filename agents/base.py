@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
@@ -16,6 +17,10 @@ from tools import TOOL_SCHEMAS, READ_ONLY_TOOLS, CONTRACT_TOOLS, ToolExecutor, b
 from grimoire import load_for as _load_grimoire
 import queue as _queue
 from event_bus import bus, interrupt_bus
+
+
+class PipelineStoppedError(Exception):
+    """Raised inside _agentic_loop when the pipeline stop event fires mid-call."""
 
 
 # ── Lightweight wrappers that mirror the OpenAI response shape ───────────────
@@ -98,8 +103,9 @@ class BaseAgent:
             self.cfg["provider"] = "deepseek"
             self.cfg["model"]    = "deepseek-v4-pro"
         self.client       = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
-        self._log_path:   Path | None          = None  # resolved lazily on first write
-        self._interrupt_q: _queue.Queue | None = None  # registered at run()-time
+        self.stop_event:  threading.Event | None = None  # set by orchestrator to abort mid-call
+        self._log_path:   Path | None            = None  # resolved lazily on first write
+        self._interrupt_q: _queue.Queue | None   = None  # registered at run()-time
 
     def _emit(self, type: str, data: str = "") -> None:
         bus.emit({
@@ -225,6 +231,35 @@ class BaseAgent:
         except OSError as e:
             logger.warning("[%s] tool-call log write failed: %s", self.NAME, e)
 
+    # ── Cancellable API wrapper ──────────────────────────────────────────────
+
+    def _call_api_with_stop(self, messages: list, system: str, tools: list, max_retries: int = 3):
+        """Run _call_api in a daemon thread; raise PipelineStoppedError if stop_event fires."""
+        if self.stop_event and self.stop_event.is_set():
+            raise PipelineStoppedError()
+
+        result_box: list = [None]
+        exc_box:    list = [None]
+
+        def _worker():
+            try:
+                result_box[0] = self._call_api(messages, system, tools, max_retries)
+            except Exception as e:
+                exc_box[0] = e
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        while t.is_alive():
+            if self.stop_event and self.stop_event.is_set():
+                raise PipelineStoppedError()
+            t.join(timeout=0.3)
+
+        if self.stop_event and self.stop_event.is_set():
+            raise PipelineStoppedError()
+        if exc_box[0]:
+            raise exc_box[0]
+        return result_box[0]
+
     # ── Agentic loop ─────────────────────────────────────────────────────────
 
     def _agentic_loop(self, messages: list, system: str, tools: list) -> dict:
@@ -232,6 +267,9 @@ class BaseAgent:
         max_steps = AGENT_TOOL_ITERATIONS.get(self.NAME, MAX_TOOL_ITERATIONS)
 
         for step in range(max_steps):
+            if self.stop_event and self.stop_event.is_set():
+                return {"status": "stopped", "output": "", "reasoning": None}
+
             # Drain any user-injected messages before the next API call
             while self._interrupt_q:
                 try:
@@ -242,7 +280,10 @@ class BaseAgent:
                 self._emit("user_interrupt", user_msg)
                 messages.append({"role": "user", "content": user_msg})
 
-            response   = self._call_api(messages, system, tools)
+            try:
+                response = self._call_api_with_stop(messages, system, tools)
+            except PipelineStoppedError:
+                return {"status": "stopped", "output": "", "reasoning": None}
             msg        = response.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None) or []
             thinking   = getattr(msg, "reasoning_content", None)
@@ -311,6 +352,8 @@ class BaseAgent:
                     "tool_call_id": tc.id,
                     "content":      str(tool_result),
                 })
+                if self.stop_event and self.stop_event.is_set():
+                    return {"status": "stopped", "output": "", "reasoning": None}
 
         self._write_thinking(all_thinking)
         return {

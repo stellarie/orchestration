@@ -182,8 +182,9 @@ class PipelineEntry:
 
 _pipeline_registry: dict[str, PipelineEntry] = {}
 _pipeline_queues:   dict[str, list]           = {}   # repo_path → ordered list of queued pipeline_ids
-_pipeline_control:  dict[str, str]            = {}   # pipeline_id → "running"|"paused"|"stopped"
-_agent_control:     dict[str, str]            = {}   # "{pipeline_id}:{agent}" → "skip"|"restart"
+_pipeline_control:     dict[str, str]                  = {}   # pipeline_id → "running"|"paused"|"stopped"
+_agent_control:        dict[str, str]                  = {}   # "{pipeline_id}:{agent}" → "skip"|"restart"
+_pipeline_stop_events: dict[str, threading.Event]      = {}   # pipeline_id → Event; set to kill mid-call
 _reg_lock = threading.Lock()
 
 
@@ -222,6 +223,8 @@ def _write_handoff(entry: "PipelineEntry"):
 def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
     """Wrapper that runs a pipeline and handles queue advancement on finish."""
     _ensure_repo(entry.repo_path, entry.pipeline_id, entry.repo_path)
+    stop_ev = threading.Event()
+    _pipeline_stop_events[entry.pipeline_id] = stop_ev
     with _reg_lock:
         _pipeline_control[entry.pipeline_id] = "running"
     try:
@@ -234,6 +237,8 @@ def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
     except Exception:
         logger.exception("[pipeline] %s crashed", entry.pipeline_id)
         final = "failed"
+    finally:
+        _pipeline_stop_events.pop(entry.pipeline_id, None)
 
     with _reg_lock:
         if entry.pipeline_id in _pipeline_registry:
@@ -449,9 +454,11 @@ def _run_pipeline_steps(
             instruction = f"{override}\n\n---\n\n{instruction}"
         bb.update_status(agent_name, "in_progress", increment_iteration=True)
         try:
-            agent  = AGENT_MAP[agent_name](repo_path, force_deepseek=force_ds, pipeline_id=pipeline_id)
+            agent = AGENT_MAP[agent_name](repo_path, force_deepseek=force_ds, pipeline_id=pipeline_id)
+            agent.stop_event = _pipeline_stop_events.get(pipeline_id)
             result = agent.run(instruction, output_suffix=suffix)
-            status = "done" if result["status"] == "success" else "failed"
+            s = result["status"]
+            status = "done" if s == "success" else "stopped" if s == "stopped" else "failed"
         except Exception:
             logger.exception("[pipeline] agent=%s crashed", agent_name)
             status = "failed"
@@ -829,13 +836,18 @@ def research_run(req: ResearchRunRequest):
         _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
 
     def _run_research():
+        stop_ev = threading.Event()
+        _pipeline_stop_events[pipeline_id] = stop_ev
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
                                 steps_override=RESEARCH_PIPELINE_STEPS)
-            final = "done"
+            ctrl = _pipeline_control.get(pipeline_id, "running")
+            final = "stopped" if ctrl == "stopped" else "done"
         except Exception:
             logger.exception("[research] %s crashed", pipeline_id)
             final = "failed"
+        finally:
+            _pipeline_stop_events.pop(pipeline_id, None)
         with _reg_lock:
             if pipeline_id in _pipeline_registry:
                 _pipeline_registry[pipeline_id].status = final
@@ -891,13 +903,18 @@ def scout_run(req: ScoutRunRequest):
         _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
 
     def _run_scout():
+        stop_ev = threading.Event()
+        _pipeline_stop_events[pipeline_id] = stop_ev
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
                                 steps_override=OSS_SCOUT_STEPS)
-            final = "done"
+            ctrl = _pipeline_control.get(pipeline_id, "running")
+            final = "stopped" if ctrl == "stopped" else "done"
         except Exception:
             logger.exception("[scout] %s crashed", pipeline_id)
             final = "failed"
+        finally:
+            _pipeline_stop_events.pop(pipeline_id, None)
         with _reg_lock:
             if pipeline_id in _pipeline_registry:
                 _pipeline_registry[pipeline_id].status = final
@@ -1014,6 +1031,9 @@ def pipeline_control(pipeline_id: str, req: PipelineControlRequest):
         elif req.action == "stop":
             _pipeline_control[pipeline_id] = "stopped"
             entry.status = "stopped"
+            stop_ev = _pipeline_stop_events.get(pipeline_id)
+            if stop_ev:
+                stop_ev.set()
             interrupt_bus.send_stop(pipeline_id) if hasattr(interrupt_bus, "send_stop") else None
         else:
             raise HTTPException(400, f"Unknown action '{req.action}'")

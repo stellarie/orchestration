@@ -117,6 +117,12 @@
     .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
     .tab-btn--add { color: var(--dim); font-size: 11px; margin-left: 4px; }
     .tab-btn--add:hover { color: var(--green); }
+    .tab-item { display: flex; align-items: center; position: relative; }
+    .tab-close { display: none; padding: 0 2px; margin-left: 2px; color: var(--dim);
+                 background: none; border: none; cursor: pointer; line-height: 1;
+                 font-size: 13px; border-radius: 3px; }
+    .tab-item:hover .tab-close { display: flex; align-items: center; }
+    .tab-close:hover { color: var(--red); background: rgba(248,81,73,.15); }
     .tab-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .tab-dot--running { background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 1.2s ease-in-out infinite; }
     .tab-dot--queued  { background: var(--yellow); }
@@ -1048,18 +1054,23 @@ function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
 
 // ── TabBar ────────────────────────────────────────────────────────────────────
 
-function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout }) {
+function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout, onClose }) {
   return html`
     <div class="tab-bar">
       <button class=${`tab-btn${activeTab === 'overview' ? ' active' : ''}`} onClick=${() => onSelect('overview')}>
         <span class="mi mi-sm">dashboard</span> Overview
       </button>
       ${pipelines.map(p => html`
-        <button key=${p.id} class=${`tab-btn${activeTab === p.id ? ' active' : ''}`} onClick=${() => onSelect(p.id)}>
-          <div class=${`tab-dot tab-dot--${p.status}`}></div>
-          ${p.label}
-          <span class="tab-id">#${p.id}</span>
-        </button>
+        <div key=${p.id} class="tab-item">
+          <button class=${`tab-btn${activeTab === p.id ? ' active' : ''}`} onClick=${() => onSelect(p.id)}>
+            <div class=${`tab-dot tab-dot--${p.status}`}></div>
+            ${p.label}
+            <span class="tab-id">#${p.id}</span>
+          </button>
+          <button class="tab-close" title="Close tab" onClick=${e => { e.stopPropagation(); onClose(p.id, p.status); }}>
+            <span class="mi" style="font-size:14px">close</span>
+          </button>
+        </div>
       `)}
       <button class="tab-btn tab-btn--add" onClick=${onNew} title="New pipeline">
         <span class="mi mi-sm">add</span>
@@ -1423,6 +1434,22 @@ function App() {
     }, 600);
   };
 
+  // Close a tab: stop if active, then remove from state
+  const handleCloseTab = async (pipeline_id, status) => {
+    const active = ['running', 'paused'].includes(status);
+    if (active) {
+      try {
+        await fetch(`${API}/pipeline/${pipeline_id}/control`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action: 'stop'}),
+        });
+      } catch {}
+    }
+    setPipelines(prev => { const n = {...prev}; delete n[pipeline_id]; return n; });
+    setPipelineOrder(prev => prev.filter(id => id !== pipeline_id));
+    setActiveTab(prev => prev === pipeline_id ? 'overview' : prev);
+  };
+
   // Pause / resume / stop a pipeline
   const handleControl = async (pipeline_id, action) => {
     try {
@@ -1491,6 +1518,7 @@ function App() {
         onNew=${() => setShowModal({mode: 'new', defaultRepo})}
         onResearch=${() => setShowModal({mode: 'research', defaultRepo})}
         onScout=${() => setShowModal({mode: 'scout', defaultRepo})}
+        onClose=${handleCloseTab}
       />
 
       <div class="tab-content">
