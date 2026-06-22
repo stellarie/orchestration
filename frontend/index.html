@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Orchestration</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -20,13 +21,23 @@
       --red:       #f85149;
       --purple:    #bc8cff;
       --orange:    #ffa657;
+      --teal:      #39c5cf;
     }
 
     html, body { height: 100%; background: var(--bg); color: var(--text); }
     body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 14px; overflow: hidden; }
 
+    .mi { font-family: 'Material Symbols Outlined'; font-size: 16px; line-height: 1;
+          font-weight: normal; font-style: normal; letter-spacing: normal;
+          text-transform: none; white-space: nowrap; word-wrap: normal;
+          direction: ltr; -webkit-font-feature-settings: 'liga'; font-feature-settings: 'liga';
+          -webkit-font-smoothing: antialiased; user-select: none; }
+    .mi-sm { font-size: 14px; }
+    .mi-xs { font-size: 12px; }
+
     /* ── layout ── */
-    .root { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+    .root { display: grid; grid-template-rows: 48px auto 1fr; height: 100vh; }
+    .tab-content { overflow: hidden; display: flex; flex-direction: column; }
 
     .header {
       display: flex; align-items: center; gap: 12px;
@@ -34,8 +45,9 @@
       background: var(--surface); border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
-    .header-title { font-weight: 600; font-size: 15px; letter-spacing: -.2px; color: var(--text); white-space: nowrap; }
-    .header-title span { color: var(--blue); }
+    .header-title { font-weight: 600; font-size: 15px; letter-spacing: -.2px; color: var(--text);
+                    white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+    .header-title .mi { color: var(--blue); font-size: 18px; }
     .header-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
     .repo-input {
       flex: 1; background: var(--bg); border: 1px solid var(--border);
@@ -45,91 +57,156 @@
     }
     .repo-input:focus { border-color: var(--blue); }
     .repo-input::placeholder { color: var(--dim); }
-    .dot {
+    .conn-dot {
       width: 8px; height: 8px; border-radius: 50%;
       flex-shrink: 0; transition: background .3s;
     }
-    .dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .dot.off { background: var(--dim); }
+    .conn-dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .conn-dot.off { background: var(--dim); }
 
-    .body { display: grid; grid-template-columns: 260px 1fr; overflow: hidden; }
+    .body { display: grid; grid-template-columns: 264px 1fr; overflow: hidden; }
 
-    /* ── agent list ── */
-    .agent-panel {
+    /* ── sidebar ── */
+    .sidebar {
       background: var(--surface); border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
     }
-    .panel-heading {
-      padding: 10px 14px 8px;
-      font-size: 11px; font-weight: 600; letter-spacing: .8px;
+
+    .sidebar-section-heading {
+      padding: 9px 14px 7px;
+      font-size: 10px; font-weight: 600; letter-spacing: .8px;
       color: var(--dim); text-transform: uppercase;
       border-bottom: 1px solid var(--border); flex-shrink: 0;
+      display: flex; align-items: center; gap: 6px;
     }
-    .agent-list { overflow-y: auto; flex: 1; padding: 6px 0; }
-    .agent-list::-webkit-scrollbar { width: 4px; }
-    .agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .sidebar-section-heading .mi { font-size: 13px; }
 
-    .agent-card {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 14px; cursor: pointer;
-      border-left: 2px solid transparent;
-      transition: background .15s, border-color .15s;
+    /* action strip under pipeline heading */
+    .pipeline-actions {
+      display: flex; gap: 6px; padding: 7px 10px 4px; flex-shrink: 0;
     }
-    .agent-card:hover { background: var(--surface2); }
-    .agent-card.selected { background: var(--surface2); border-left-color: var(--blue); }
-
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    .action-btn {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+      padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+      cursor: pointer; border: 1px solid; transition: background .15s, border-color .15s;
     }
-    .status-dot.idle        { background: var(--border); }
-    .status-dot.queued      { background: var(--dim); }
-    .status-dot.in_progress { background: var(--blue); animation: pulse 1.2s ease-in-out infinite; }
-    .status-dot.done        { background: var(--green); }
-    .status-dot.failed      { background: var(--red); }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .action-btn .mi { font-size: 14px; }
+    .action-btn--new  { background: rgba(56,139,253,.1); border-color: rgba(56,139,253,.3); color: var(--blue); }
+    .action-btn--new:hover  { background: rgba(56,139,253,.2); border-color: var(--blue); }
+    .action-btn--resume { background: rgba(63,185,80,.1); border-color: rgba(63,185,80,.3); color: var(--green); }
+    .action-btn--resume:hover { background: rgba(63,185,80,.2); border-color: var(--green); }
+    .action-btn--queue  { background: rgba(210,153,34,.1); border-color: rgba(210,153,34,.3); color: var(--yellow); }
+    .action-btn--queue:hover { background: rgba(210,153,34,.2); border-color: var(--yellow); }
+    .action-btn:disabled { opacity: .4; cursor: default; }
 
-    .agent-info { flex: 1; min-width: 0; }
-    .agent-name { font-size: 13px; font-weight: 500; }
-    .agent-sub  { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-
-    .status-badge {
-      font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 10px;
-      flex-shrink: 0; text-transform: uppercase; letter-spacing: .4px;
+    /* ── tab bar ── */
+    .tab-bar {
+      display: flex; align-items: stretch; gap: 0;
+      padding: 0 12px; border-bottom: 1px solid var(--border);
+      background: var(--surface); overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
     }
-    .badge-idle        { background: var(--surface2); color: var(--dim); }
-    .badge-queued      { background: var(--surface2); color: var(--dim); }
-    .badge-in_progress { background: rgba(56,139,253,.15); color: var(--blue); }
-    .badge-done        { background: rgba(63,185,80,.15);  color: var(--green); }
-    .badge-failed      { background: rgba(248,81,73,.15);  color: var(--red); }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 14px; height: 36px; border: none; background: none;
+      color: var(--dim); cursor: pointer; font-size: 12.5px; font-weight: 500;
+      border-bottom: 2px solid transparent; white-space: nowrap;
+      transition: color .12s, border-color .12s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
+    .tab-btn--add { color: var(--dim); font-size: 11px; margin-left: 4px; }
+    .tab-btn--add:hover { color: var(--green); }
+    .tab-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .tab-dot--running { background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 1.2s ease-in-out infinite; }
+    .tab-dot--queued  { background: var(--yellow); }
+    .tab-dot--done    { background: var(--dim); }
+    .tab-dot--failed  { background: var(--red); }
+    .tab-dot--idle    { background: var(--border); }
+    .tab-id { font-family: monospace; font-size: 10px; color: var(--dim);
+               background: var(--surface2); padding: 1px 5px; border-radius: 3px; }
 
-    .empty-agents {
-      padding: 32px 14px; text-align: center; color: var(--dim); font-size: 12px; line-height: 1.6;
+    /* ── status pill ── */
+    .status-pill { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 9px;
+                   letter-spacing: .3px; text-transform: uppercase; }
+    .status-pill--running { color: var(--green); background: rgba(63,185,80,.12); }
+    .status-pill--queued  { color: var(--yellow); background: rgba(210,153,34,.12); }
+    .status-pill--done    { color: var(--dim);    background: rgba(139,148,158,.1); }
+    .status-pill--failed  { color: var(--red);    background: rgba(248,81,73,.12); }
+
+    /* ── pipeline tab header ── */
+    .pipeline-tab-header {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .pipeline-tab-header .repo-label {
+      font-size: 11px; color: var(--dim); overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; flex: 1;
+      font-family: 'Consolas', monospace;
+    }
+    .queued-hint {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--yellow); padding: 4px 10px 2px;
+      opacity: .8;
     }
 
-    /* ── pipeline graph ── */
-    .pipeline-graph { overflow-y: auto; flex: 1; padding: 8px 10px 12px; }
+    /* ── overview tab ── */
+    .overview-tab { padding: 24px 28px; overflow-y: auto; flex: 1; }
+    .overview-heading { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text); }
+    .overview-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .overview-table th {
+      color: var(--dim); font-weight: 600; text-align: left;
+      padding: 6px 14px; border-bottom: 1px solid var(--border);
+      font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
+    }
+    .overview-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .overview-row { cursor: pointer; transition: background .1s; }
+    .overview-row:hover td { background: var(--surface2); }
+    .overview-task { color: var(--dim); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .overview-empty { color: var(--dim); font-size: 13px; padding: 32px 0; text-align: center; }
+    .overview-agents { font-family: monospace; font-size: 11px; color: var(--blue); }
+
+    /* ── agent pre-prompt (queued pipeline) ── */
+    .agent-preprompt {
+      display: block; width: 100%; margin-top: 5px;
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-size: 11px; font-family: 'Segoe UI', sans-serif;
+      border-radius: 5px; padding: 5px 7px; resize: vertical; min-height: 44px;
+      box-sizing: border-box; line-height: 1.5;
+    }
+    .agent-preprompt:focus { outline: none; border-color: var(--blue); }
+    .preprompt-label { display: block; font-size: 9px; color: var(--dim); margin-top: 4px;
+                        letter-spacing: .5px; text-transform: uppercase; }
+
+    /* ── pre-prompt section inside modal ── */
+    .modal-preprompts { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+    .modal-preprompt-row label { font-size: 11px; color: var(--dim); font-weight: 600; }
+
+    /* ── pipeline graph (scrollable middle section) ── */
+    .pipeline-graph { overflow-y: auto; flex: 1; padding: 6px 8px 8px; min-height: 0; }
     .pipeline-graph::-webkit-scrollbar { width: 4px; }
     .pipeline-graph::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
     .pg-section-label {
       font-size: 10px; font-weight: 600; letter-spacing: .6px; color: var(--dim);
-      text-transform: uppercase; padding: 10px 4px 6px;
+      text-transform: uppercase; padding: 10px 4px 5px;
     }
 
     .pg-node {
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; border-radius: 8px;
+      display: flex; align-items: center; gap: 7px;
+      padding: 6px 8px 6px 10px; border-radius: 8px;
       border: 1px solid var(--border); background: var(--surface2);
-      cursor: pointer; transition: border-color .2s, background .15s;
+      cursor: pointer; transition: border-color .2s, background .15s, opacity .2s;
     }
     .pg-node:hover { background: #252c38; }
     .pg-node.selected { box-shadow: 0 0 0 2px var(--blue); }
     .pg-node--in_progress { border-color: var(--blue); background: rgba(56,139,253,.07); }
-    .pg-node--done        { border-color: rgba(63,185,80,.5); background: rgba(63,185,80,.05); }
-    .pg-node--failed      { border-color: var(--red); background: rgba(248,81,73,.06); }
+    .pg-node--done        { border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.04); }
+    .pg-node--failed      { border-color: var(--red); background: rgba(248,81,73,.05); }
+    .pg-node--skipped     { opacity: .4; border-style: dashed; }
 
     .pg-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
       background: var(--border);
     }
     .pg-node--in_progress .pg-dot {
@@ -139,12 +216,14 @@
     .pg-node--done   .pg-dot { background: var(--green); }
     .pg-node--failed .pg-dot { background: var(--red); }
 
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
     .pg-info { flex: 1; min-width: 0; }
-    .pg-name { font-size: 12.5px; font-weight: 500; color: var(--text); }
+    .pg-name { font-size: 12px; font-weight: 500; color: var(--text); }
     .pg-sub  { font-size: 10px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 
     .pg-badge {
-      font-size: 9.5px; font-weight: 600; padding: 2px 5px; border-radius: 8px;
+      font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 8px;
       flex-shrink: 0; text-transform: uppercase; letter-spacing: .3px;
     }
     .pg-badge--idle        { background: transparent; color: var(--dim); }
@@ -152,9 +231,19 @@
     .pg-badge--done        { background: rgba(63,185,80,.15);  color: var(--green); }
     .pg-badge--failed      { background: rgba(248,81,73,.15);  color: var(--red); }
 
+    .skip-btn {
+      background: none; border: none; color: var(--dim); cursor: pointer;
+      padding: 2px; border-radius: 4px; line-height: 1; flex-shrink: 0;
+      transition: color .15s, background .15s;
+      display: flex; align-items: center;
+    }
+    .skip-btn:hover { color: var(--text); background: var(--surface); }
+    .skip-btn.skipped { color: var(--orange); }
+    .skip-btn .mi { font-size: 15px; }
+
     .pg-connector {
       display: flex; flex-direction: column; align-items: center;
-      height: 18px; flex-shrink: 0;
+      height: 14px; flex-shrink: 0;
     }
     .pg-connector-line  { width: 1px; flex: 1; background: var(--border); }
     .pg-connector-arrow {
@@ -163,25 +252,51 @@
       border-right: 3px solid transparent;
       border-top: 4px solid var(--border);
     }
-    .pg-connector--done .pg-connector-line  { background: rgba(63,185,80,.5); }
-    .pg-connector--done .pg-connector-arrow { border-top-color: rgba(63,185,80,.5); }
+    .pg-connector--done .pg-connector-line  { background: rgba(63,185,80,.4); }
+    .pg-connector--done .pg-connector-arrow { border-top-color: rgba(63,185,80,.4); }
     .pg-connector--in_progress .pg-connector-line  { background: var(--blue); }
     .pg-connector--in_progress .pg-connector-arrow { border-top-color: var(--blue); }
 
-    .new-btn {
-      margin: 8px 10px 2px; padding: 6px 10px;
-      background: rgba(56,139,253,.12); border: 1px solid rgba(56,139,253,.3);
-      color: var(--blue); border-radius: 6px; font-size: 12px; font-weight: 600;
-      cursor: pointer; width: calc(100% - 20px); text-align: center;
+    /* ── consultant section (pinned bottom of sidebar) ── */
+    .consultant-section {
+      flex-shrink: 0; border-top: 1px solid var(--border);
+    }
+    .consultant-card {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 12px; cursor: pointer;
+      border-left: 2px solid transparent;
       transition: background .15s, border-color .15s;
     }
-    .new-btn:hover { background: rgba(56,139,253,.22); border-color: var(--blue); }
+    .consultant-card:hover { background: var(--surface2); }
+    .consultant-card.selected { background: var(--surface2); border-left-color: var(--teal); }
+    .consultant-icon { color: var(--teal); display: flex; align-items: center; flex-shrink: 0; }
+    .consultant-icon .mi { font-size: 18px; }
+    .consultant-info { flex: 1; min-width: 0; }
+    .consultant-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+    .consultant-sub  { font-size: 10px; color: var(--dim); margin-top: 1px;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .consultant-badge {
+      font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 8px;
+      flex-shrink: 0; text-transform: uppercase; letter-spacing: .3px;
+    }
+    .consultant-badge--idle        { background: transparent; color: var(--dim); }
+    .consultant-badge--in_progress { background: rgba(57,197,207,.15); color: var(--teal);  }
+    .consultant-badge--done        { background: rgba(57,197,207,.1);  color: var(--teal);  }
+    .consultant-badge--failed      { background: rgba(248,81,73,.15);  color: var(--red);   }
+    .consultant-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex-shrink: 0;
+    }
+    .consultant-dot.in_progress {
+      background: var(--teal); box-shadow: 0 0 5px var(--teal);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .consultant-dot.done   { background: var(--teal); }
+    .consultant-dot.failed { background: var(--red); }
 
     /* ── modal ── */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,.65);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 100;
+      display: flex; align-items: center; justify-content: center; z-index: 100;
     }
     .modal {
       background: var(--surface); border: 1px solid var(--border);
@@ -190,33 +305,69 @@
       box-shadow: 0 8px 32px rgba(0,0,0,.5);
     }
     .modal-title { font-size: 15px; font-weight: 600; color: var(--text); }
-    .modal label { font-size: 12px; font-weight: 600; color: var(--dim); letter-spacing: .4px; }
-    .modal-field { display: flex; flex-direction: column; gap: 6px; }
+    .modal label  { font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: .4px; }
+    .modal-field  { display: flex; flex-direction: column; gap: 6px; }
     .modal input, .modal textarea {
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
       padding: 7px 10px; border-radius: 6px; font-size: 13px;
       font-family: 'Consolas', monospace; outline: none; width: 100%;
     }
     .modal input:focus, .modal textarea:focus { border-color: var(--blue); }
-    .modal textarea { min-height: 110px; resize: vertical; font-family: 'Segoe UI', sans-serif; }
+    .modal textarea { min-height: 100px; resize: vertical; font-family: 'Segoe UI', sans-serif; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
     .btn-cancel {
       padding: 6px 16px; background: var(--surface2); border: 1px solid var(--border);
       color: var(--dim); border-radius: 6px; font-size: 13px; cursor: pointer;
     }
     .btn-cancel:hover { color: var(--text); }
-    .btn-run {
+    .btn-primary {
+      display: flex; align-items: center; gap: 6px;
       padding: 6px 18px; background: var(--blue); border: none;
       color: #fff; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
     }
-    .btn-run:hover { background: #4f9cff; }
-    .btn-run:disabled { opacity: .45; cursor: default; }
+    .btn-primary:hover { background: #4f9cff; }
+    .btn-primary:disabled { opacity: .45; cursor: default; }
     .modal-status { font-size: 12px; color: var(--green); min-height: 18px; }
+
+    /* skip chips in modal */
+    .skip-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .skip-chip {
+      padding: 3px 10px; border-radius: 12px; font-size: 11px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface2); color: var(--dim);
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .skip-chip.active { background: rgba(255,166,87,.12); border-color: rgba(255,166,87,.4); color: var(--orange); }
 
     /* ── right panel ── */
     .right-panel { display: flex; flex-direction: column; overflow: hidden; }
 
-    /* ── thinking stream ── */
+    /* ── stream header ── */
+    .stream-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+    }
+    .stream-header-title {
+      font-size: 10px; font-weight: 600; letter-spacing: .7px;
+      color: var(--dim); text-transform: uppercase; margin-right: 2px;
+    }
+    .agent-filter {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 2px 8px; border-radius: 4px; font-size: 11px;
+      font-family: 'Consolas', monospace; outline: none; flex: 1; max-width: 160px;
+    }
+    .agent-filter:focus { border-color: var(--blue); }
+    .icon-btn {
+      background: none; border: 1px solid var(--border); color: var(--dim);
+      padding: 2px 6px; border-radius: 4px; cursor: pointer;
+      display: flex; align-items: center; gap: 3px;
+      font-size: 11px; transition: color .15s, border-color .15s;
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--dim); }
+    .icon-btn.active { color: var(--blue); border-color: rgba(56,139,253,.4); }
+    .icon-btn .mi { font-size: 14px; }
+
+    /* ── stream ── */
     .stream-panel {
       flex: 1; overflow-y: auto; padding: 12px 16px;
       font-family: 'Consolas', 'Monaco', monospace; font-size: 12.5px; line-height: 1.6;
@@ -231,7 +382,6 @@
     }
 
     .entry { margin-bottom: 6px; }
-
     .entry-separator {
       color: var(--dim); font-size: 11px; padding: 6px 0 4px;
       display: flex; align-items: center; gap: 8px;
@@ -239,44 +389,40 @@
     .entry-separator::before, .entry-separator::after {
       content: ''; flex: 1; height: 1px; background: var(--border);
     }
-
-    .entry-thinking .thinking-header {
-      color: var(--dim); font-size: 11px; margin-bottom: 3px;
-    }
-    .entry-thinking .thinking-body {
-      color: var(--text); white-space: pre-wrap; word-break: break-word;
-    }
-
-    .entry-tool {
-      color: var(--purple); padding: 1px 0;
-    }
-    .entry-tool .ts { color: var(--dim); font-size: 11px; margin-right: 6px; }
+    .entry-thinking .thinking-header { color: var(--dim); font-size: 11px; margin-bottom: 3px; }
+    .entry-thinking .thinking-body   { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+    .entry-tool { color: var(--purple); padding: 1px 0; }
+    .entry-tool .ts        { color: var(--dim); font-size: 11px; margin-right: 6px; }
     .entry-tool .agent-tag { color: var(--dim); margin-right: 4px; }
-
     .entry-done   { color: var(--green); font-size: 11px; padding: 2px 0; }
     .entry-failed { color: var(--red);   font-size: 11px; padding: 2px 0; }
+    .entry-interrupt { color: var(--orange); padding: 1px 0; font-style: italic; }
+    .entry-interrupt .ts   { color: var(--dim);    font-size: 11px; margin-right: 6px; }
+    .entry-interrupt .itag { color: var(--yellow); margin-right: 4px; font-style: normal; }
+    .entry-message { padding: 4px 0 6px; }
+    .entry-message .msg-header { color: var(--dim); font-size: 11px; margin-bottom: 4px; }
+    .entry-message .msg-body   { color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.7; }
 
     /* ── output drawer ── */
     .drawer {
-      border-top: 1px solid var(--border);
-      background: var(--surface);
-      display: flex; flex-direction: column;
-      height: 280px; flex-shrink: 0;
+      border-top: 1px solid var(--border); background: var(--surface);
+      display: flex; flex-direction: column; height: 270px; flex-shrink: 0;
     }
     .drawer-header {
       display: flex; align-items: center; gap: 8px;
-      padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+      padding: 7px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
-    .drawer-title { font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; flex: 1; }
+    .drawer-title { font-size: 11px; font-weight: 600; color: var(--dim);
+                    text-transform: uppercase; letter-spacing: .6px; flex: 1; }
     .file-select {
       background: var(--bg); border: 1px solid var(--border); color: var(--text);
       padding: 3px 8px; border-radius: 5px; font-size: 12px;
-      font-family: 'Consolas', monospace; outline: none; flex: 1; max-width: 320px;
+      font-family: 'Consolas', monospace; outline: none; flex: 1; max-width: 300px;
     }
     .file-select:focus { border-color: var(--blue); }
     .drawer-close {
       background: none; border: none; color: var(--dim); cursor: pointer;
-      font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1;
+      padding: 2px 4px; border-radius: 4px; display: flex; align-items: center;
     }
     .drawer-close:hover { background: var(--surface2); color: var(--text); }
     .drawer-body {
@@ -290,18 +436,20 @@
 
     /* ── compose bar ── */
     .compose-bar {
-      border-top: 1px solid var(--border);
-      background: var(--surface);
-      display: flex; align-items: center; gap: 8px;
+      border-top: 1px solid var(--border); background: var(--surface);
+      display: flex; align-items: center; gap: 7px;
       padding: 7px 12px; flex-shrink: 0;
     }
-    .compose-label { font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: .4px; white-space: nowrap; }
-    .compose-select {
-      background: var(--bg); border: 1px solid var(--border); color: var(--text);
-      padding: 4px 8px; border-radius: 5px; font-size: 12px;
-      font-family: 'Consolas', monospace; outline: none; max-width: 130px;
+    .compose-target {
+      display: flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--bg);
+      font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+      min-width: 80px; color: var(--dim);
     }
-    .compose-select:focus { border-color: var(--blue); }
+    .compose-target.has-target { border-color: rgba(56,139,253,.4); color: var(--blue); }
+    .compose-target.is-consultant { border-color: rgba(57,197,207,.4); color: var(--teal); }
+    .compose-target .mi { font-size: 13px; }
     .compose-input {
       flex: 1; background: var(--bg); border: 1px solid var(--border);
       color: var(--text); padding: 4px 10px; border-radius: 5px;
@@ -310,118 +458,45 @@
     .compose-input:focus { border-color: var(--blue); }
     .compose-input::placeholder { color: var(--dim); }
     .compose-send {
-      background: var(--blue); border: none; color: #fff;
-      padding: 4px 14px; border-radius: 5px; font-size: 12px; font-weight: 600;
-      cursor: pointer; white-space: nowrap;
+      display: flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--dim);
+      padding: 4px 12px; border-radius: 5px; font-size: 12px; font-weight: 600;
+      cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s;
     }
-    .compose-send:hover { background: #4f9cff; }
+    .compose-send:hover:not(:disabled) { color: var(--text); border-color: var(--dim); }
     .compose-send:disabled { opacity: .35; cursor: default; }
+    .compose-send .mi { font-size: 14px; }
     .compose-run {
-      background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.3);
-      color: var(--green); padding: 4px 12px; border-radius: 5px;
+      display: flex; align-items: center; gap: 4px;
+      background: rgba(56,139,253,.12); border: 1px solid rgba(56,139,253,.3);
+      color: var(--blue); padding: 4px 12px; border-radius: 5px;
       font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+      transition: background .15s;
     }
-    .compose-run:hover { background: rgba(63,185,80,.22); border-color: var(--green); }
+    .compose-run:hover:not(:disabled) { background: rgba(56,139,253,.22); border-color: var(--blue); }
     .compose-run:disabled { opacity: .35; cursor: default; }
-
-    .entry-interrupt {
-      color: var(--orange); padding: 1px 0; font-style: italic;
-    }
-    .entry-interrupt .ts { color: var(--dim); font-size: 11px; margin-right: 6px; }
-    .entry-interrupt .itag { color: var(--yellow); margin-right: 4px; font-style: normal; }
+    .compose-run .mi { font-size: 14px; }
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="module">
 import { h, render }                              from 'https://esm.sh/preact@10.23.2';
-import { useState, useEffect, useRef, useCallback } from 'https://esm.sh/preact@10.23.2/hooks';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'https://esm.sh/preact@10.23.2/hooks';
 import htm                                         from 'https://esm.sh/htm@3.1.1';
 
 const html = htm.bind(h);
 const MAX_STREAM = 600;
-const API = '';  // same origin
+const API = '';
 
-// ── helpers ────────────────────────────────────────────────────────────────
-
-function fmtTime(iso) {
-  const d = new Date(iso);
-  return d.toTimeString().slice(0, 8);
+function fmtTime(iso) { return new Date(iso).toTimeString().slice(0, 8); }
+function shortPath(p) {
+  if (!p) return '';
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts[parts.length - 1] || p;
 }
-
-function badgeClass(status) { return `status-badge badge-${status ?? 'idle'}`; }
-function dotClass(status)   { return `status-dot ${status ?? 'idle'}`; }
 
 const LABEL = { idle: 'idle', queued: 'queued', in_progress: 'running', done: 'done', failed: 'failed' };
-
-// ── NewProjectModal ─────────────────────────────────────────────────────────
-
-function NewProjectModal({ defaultRepo, onClose, onStarted }) {
-  const [repo,   setRepo]   = useState(defaultRepo ?? '');
-  const [desc,   setDesc]   = useState('');
-  const [status, setStatus] = useState('');
-  const [busy,   setBusy]   = useState(false);
-
-  const submit = async () => {
-    if (!repo.trim() || !desc.trim()) return;
-    setBusy(true);
-    setStatus('');
-    try {
-      const r = await fetch(`${API}/pipeline/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_path: repo.trim(), description: desc.trim() }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.detail ?? 'Server error');
-      setStatus(`Started — run ${d.task_id}`);
-      onStarted(repo.trim());
-      setTimeout(onClose, 1200);
-    } catch (e) {
-      setStatus(`Error: ${e.message}`);
-      setBusy(false);
-    }
-  };
-
-  const onKey = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); };
-
-  return html`
-    <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
-      <div class="modal">
-        <div class="modal-title">New Pipeline Run</div>
-
-        <div class="modal-field">
-          <label>REPO PATH</label>
-          <input
-            type="text"
-            placeholder="e.g. C:/projects/myapp"
-            value=${repo}
-            onInput=${e => setRepo(e.target.value)}
-          />
-        </div>
-
-        <div class="modal-field">
-          <label>TASK DESCRIPTION</label>
-          <textarea
-            placeholder="Describe what you want to build or change…"
-            value=${desc}
-            onInput=${e => setDesc(e.target.value)}
-            onKeyDown=${onKey}
-          ></textarea>
-        </div>
-
-        <div class="modal-status">${status}</div>
-
-        <div class="modal-actions">
-          <button class="btn-cancel" onClick=${onClose} disabled=${busy}>Cancel</button>
-          <button class="btn-run"    onClick=${submit}  disabled=${busy || !repo.trim() || !desc.trim()}>
-            ${busy ? 'Starting…' : 'Run Pipeline'}
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
 
 const PIPELINE_AGENTS = [
   "architect", "designer", "planner", "scaffolder",
@@ -430,25 +505,148 @@ const PIPELINE_AGENTS = [
 ];
 const PIPELINE_SET = new Set(PIPELINE_AGENTS);
 
+// ── PipelineModal (new run + queue) ─────────────────────────────────────────
+
+function PipelineModal({ mode, defaultRepo, onClose, onCreated }) {
+  const isQueue = mode === 'queue';
+  const [repo,      setRepo]      = useState(defaultRepo ?? '');
+  const [desc,      setDesc]      = useState('');
+  const [skipped,   setSkipped]   = useState(new Set());
+  const [overrides, setOverrides] = useState({});
+  const [status,    setStatus]    = useState('');
+  const [busy,      setBusy]      = useState(false);
+
+  const toggleSkip = (name) => setSkipped(prev => {
+    const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n;
+  });
+
+  const submit = async () => {
+    if (!repo.trim() || !desc.trim()) return;
+    setBusy(true); setStatus('');
+    try {
+      const endpoint = isQueue ? '/pipeline/queue' : '/pipeline/run';
+      const body = {
+        repo_path:   repo.trim(),
+        description: desc.trim(),
+        skip_agents: [...skipped],
+        ...(isQueue && { agent_overrides: overrides }),
+      };
+      const r = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail ?? 'Server error');
+      onCreated(d.pipeline_id, repo.trim(), desc.trim(), isQueue, new Set(skipped), overrides);
+    } catch (e) { setStatus(`Error: ${e.message}`); setBusy(false); }
+  };
+
+  const onKey = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); };
+
+  return html`
+    <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+      <div class="modal" style="max-height:90vh;overflow-y:auto">
+        <div class="modal-title">${isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
+
+        <div class="modal-field">
+          <label>REPO PATH</label>
+          <input type="text" placeholder="e.g. C:/projects/myapp"
+            value=${repo} onInput=${e => setRepo(e.target.value)} />
+        </div>
+
+        <div class="modal-field">
+          <label>TASK DESCRIPTION</label>
+          <textarea placeholder="Describe what you want to build or change…"
+            value=${desc} onInput=${e => setDesc(e.target.value)} onKeyDown=${onKey}></textarea>
+        </div>
+
+        <div class="modal-field">
+          <label>SKIP AGENTS</label>
+          <div class="skip-chips">
+            ${PIPELINE_AGENTS.map(n => html`
+              <button key=${n} class=${`skip-chip${skipped.has(n) ? ' active' : ''}`}
+                onClick=${() => toggleSkip(n)}>${n}</button>
+            `)}
+          </div>
+        </div>
+
+        ${isQueue && html`
+          <div class="modal-field">
+            <label>PRE-PROMPTS (optional)</label>
+            <div class="modal-preprompts">
+              ${PIPELINE_AGENTS.filter(n => !skipped.has(n)).map(n => html`
+                <div key=${n} class="modal-preprompt-row">
+                  <label>${n}</label>
+                  <textarea class="agent-preprompt" style="min-height:36px"
+                    placeholder="Extra instruction for ${n}…"
+                    value=${overrides[n] ?? ''}
+                    onInput=${e => setOverrides(prev => ({...prev, [n]: e.target.value}))}
+                  ></textarea>
+                </div>
+              `)}
+            </div>
+          </div>
+        `}
+
+        <div class="modal-status">${status}</div>
+
+        <div class="modal-actions">
+          <button class="btn-cancel" onClick=${onClose} disabled=${busy}>Cancel</button>
+          <button class="btn-primary" onClick=${submit} disabled=${busy || !repo.trim() || !desc.trim()}>
+            <span class="mi mi-sm">${isQueue ? 'queue' : 'play_arrow'}</span>
+            ${busy ? 'Starting…' : isQueue ? 'Queue Pipeline' : 'Run Pipeline'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ── PipelineGraph ────────────────────────────────────────────────────────────
 
-function PipelineGraph({ agents, agentOrder, selectedAgent, onSelect }) {
-  const independents = agentOrder.filter(n => !PIPELINE_SET.has(n));
+function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSelect, onSkipToggle,
+                          showPrePrompts, agentOverrides, onOverrideChange }) {
+  const independents = agentOrder.filter(n => !PIPELINE_SET.has(n) && n !== 'consultant');
 
-  const renderNode = (name) => {
-    const ag = agents[name] ?? {};
-    const st = ag.status ?? 'idle';
+  const renderNode = (name, showSkip = false) => {
+    const ag      = agents[name] ?? {};
+    const st      = ag.status ?? 'idle';
+    const skipped = skippedAgents?.has(name) ?? false;
     return html`
-      <div
-        class=${`pg-node pg-node--${st}${selectedAgent === name ? ' selected' : ''}`}
-        onClick=${() => onSelect(name)}
-      >
-        <div class="pg-dot"></div>
-        <div class="pg-info">
-          <div class="pg-name">${name}</div>
-          ${ag.currentTool && html`<div class="pg-sub">→ ${ag.currentTool}</div>`}
+      <div key=${name}>
+        <div
+          class=${`pg-node pg-node--${st}${selectedAgent === name ? ' selected' : ''}${skipped ? ' pg-node--skipped' : ''}`}
+          onClick=${() => onSelect(name)}
+        >
+          <div class="pg-dot"></div>
+          <div class="pg-info">
+            <div class="pg-name">${name}</div>
+            ${ag.currentTool && html`<div class="pg-sub">${ag.currentTool}</div>`}
+          </div>
+          ${!skipped
+            ? html`<div class=${`pg-badge pg-badge--${st}`}>${LABEL[st] ?? st}</div>`
+            : html`<div class="pg-badge pg-badge--idle">skip</div>`
+          }
+          ${showSkip && html`
+            <button
+              class=${`skip-btn${skipped ? ' skipped' : ''}`}
+              title=${skipped ? 'Un-skip' : 'Skip this agent'}
+              onClick=${e => { e.stopPropagation(); onSkipToggle(name); }}
+            >
+              <span class="mi">${skipped ? 'do_not_disturb_on' : 'skip_next'}</span>
+            </button>
+          `}
         </div>
-        <div class=${`pg-badge pg-badge--${st}`}>${LABEL[st] ?? st}</div>
+        ${showPrePrompts && !skipped && html`
+          <span class="preprompt-label">pre-prompt</span>
+          <textarea class="agent-preprompt"
+            placeholder="Optional extra instruction for ${name}…"
+            value=${agentOverrides?.[name] ?? ''}
+            onInput=${e => onOverrideChange?.(name, e.target.value)}
+            onClick=${e => e.stopPropagation()}
+          ></textarea>
+        `}
       </div>
     `;
   };
@@ -456,7 +654,7 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, onSelect }) {
   return html`
     <div class="pipeline-graph">
       ${PIPELINE_AGENTS.map((name, i) => html`
-        ${renderNode(name)}
+        ${renderNode(name, true)}
         ${i < PIPELINE_AGENTS.length - 1 && html`
           <div class=${`pg-connector pg-connector--${agents[name]?.status ?? 'idle'}`}>
             <div class="pg-connector-line"></div>
@@ -467,166 +665,174 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, onSelect }) {
 
       ${independents.length > 0 && html`
         <div class="pg-section-label">Independent</div>
-        ${independents.map(name => renderNode(name))}
+        ${independents.map(name => renderNode(name, false))}
       `}
     </div>
   `;
 }
 
-// ── AgentCard ───────────────────────────────────────────────────────────────
+// ── ConsultantSection ────────────────────────────────────────────────────────
 
-function AgentCard({ name, status, currentTool, selected, onClick }) {
+function ConsultantSection({ agentState, selected, onSelect }) {
+  const st = agentState?.status ?? 'idle';
   return html`
-    <div class=${`agent-card${selected ? ' selected' : ''}`} onClick=${onClick}>
-      <div class=${dotClass(status)}></div>
-      <div class="agent-info">
-        <div class="agent-name">${name}</div>
-        ${currentTool && html`<div class="agent-sub">→ ${currentTool}</div>`}
+    <div class="consultant-section">
+      <div class="sidebar-section-heading">
+        <span class="mi mi-sm">support_agent</span> Consultant
       </div>
-      <div class=${badgeClass(status)}>${LABEL[status] ?? status}</div>
+      <div
+        class=${`consultant-card${selected ? ' selected' : ''}`}
+        onClick=${() => onSelect('consultant')}
+        title="Always available — click to prompt"
+      >
+        <div class=${`consultant-dot ${st}`}></div>
+        <div class="consultant-info">
+          <div class="consultant-name">consultant</div>
+          ${agentState?.currentTool
+            ? html`<div class="consultant-sub">${agentState.currentTool}</div>`
+            : html`<div class="consultant-sub">full project visibility</div>`
+          }
+        </div>
+        <div class=${`consultant-badge consultant-badge--${st}`}>${LABEL[st] ?? st}</div>
+      </div>
     </div>
   `;
 }
 
-// ── StreamEntry ─────────────────────────────────────────────────────────────
+// ── StreamEntry ──────────────────────────────────────────────────────────────
 
 function StreamEntry({ entry }) {
   const { type, agent, data, ts } = entry;
-
-  if (type === 'agent_start') return html`
-    <div class="entry entry-separator">${fmtTime(ts)} [${agent}] started</div>
-  `;
-
-  if (type === 'agent_done') return html`
-    <div class="entry entry-done">✓ ${fmtTime(ts)} [${agent}] done</div>
-  `;
-
-  if (type === 'agent_failed') return html`
-    <div class="entry entry-failed">✗ ${fmtTime(ts)} [${agent}] failed</div>
-  `;
-
-  if (type === 'tool_call') return html`
+  if (type === 'agent_start')  return html`<div class="entry entry-separator">${fmtTime(ts)} [${agent}] started</div>`;
+  if (type === 'agent_done')   return html`<div class="entry entry-done"><span class="mi mi-xs">check_circle</span> ${fmtTime(ts)} [${agent}] done</div>`;
+  if (type === 'agent_failed') return html`<div class="entry entry-failed"><span class="mi mi-xs">error</span> ${fmtTime(ts)} [${agent}] failed</div>`;
+  if (type === 'tool_call')    return html`
     <div class="entry entry-tool">
       <span class="ts">${fmtTime(ts)}</span>
       <span class="agent-tag">[${agent}]</span>→ ${data}
-    </div>
-  `;
-
+    </div>`;
   if (type === 'thinking') return html`
     <div class="entry entry-thinking">
       <div class="thinking-header">${fmtTime(ts)} [${agent}]</div>
       <div class="thinking-body">${data}</div>
-    </div>
-  `;
-
+    </div>`;
+  if (type === 'message') return html`
+    <div class="entry entry-message">
+      <div class="msg-header">${fmtTime(ts)} [${agent}]</div>
+      <div class="msg-body">${data}</div>
+    </div>`;
   if (type === 'user_interrupt') return html`
     <div class="entry entry-interrupt">
       <span class="ts">${fmtTime(ts)}</span>
       <span class="itag">[you → ${agent}]</span>${data}
-    </div>
-  `;
-
+    </div>`;
   return null;
 }
 
 // ── ComposeBar ───────────────────────────────────────────────────────────────
 
-function ComposeBar({ agents, agentOrder, repoPath }) {
-  const [target,   setTarget]   = useState('');
+function ComposeBar({ target, agents, repoPath }) {
   const [text,     setText]     = useState('');
   const [busy,     setBusy]     = useState(false);
-  const [feedback, setFeedback] = useState('');  // '' | 'sent' | 'queued' | 'started'
+  const [feedback, setFeedback] = useState('');
 
-  // Auto-select first agent when list populates
-  useEffect(() => {
-    if (agentOrder.length && !target) setTarget(agentOrder[0]);
-  }, [agentOrder.length]);
+  const canAct       = !!target && !!text.trim() && !busy;
+  const isConsultant = target === 'consultant';
+  const isLive       = agents[target]?.status === 'in_progress';
 
-  const canAct = !!target && !!text.trim() && !busy;
+  const flash = (label) => { setFeedback(label); setText(''); setTimeout(() => setFeedback(''), 3000); };
 
-  const flash = (label) => {
-    setFeedback(label);
-    setText('');
-    setTimeout(() => setFeedback(''), 3000);
-  };
-
-  // Queue message into agent inbox (existing behaviour)
   const queue = async () => {
     if (!canAct) return;
     setBusy(true);
     try {
-      const r = await fetch(`${API}/agent/prompt`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent: target, message: text.trim() }),
-      });
-      const d = await r.json();
-      flash(d.live ? 'sent ✓' : 'queued ✓');
+      if (isConsultant) {
+        // Consultant uses dedicated endpoint — always fires, no queue-only mode
+        await fetch(`${API}/consultant/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text.trim(), project_repo_path: repoPath ?? '' }),
+        });
+        flash('sent ✓');
+      } else {
+        const r = await fetch(`${API}/agent/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent: target, message: text.trim() }),
+        });
+        const d = await r.json();
+        flash(d.live ? 'sent ✓' : 'queued ✓');
+      }
     } finally { setBusy(false); }
   };
 
-  // Activate agent immediately with this as the instruction
   const activate = async () => {
-    if (!canAct || !repoPath) return;
+    if (!canAct) return;
     setBusy(true);
     try {
-      const r = await fetch(`${API}/agent/activate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent: target, repo_path: repoPath, instruction: text.trim() }),
-      });
-      const d = await r.json();
-      flash(d.status === 'started' ? 'started ✓' : 'queued ✓');
+      if (isConsultant) {
+        await fetch(`${API}/consultant/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text.trim(), project_repo_path: repoPath ?? '' }),
+        });
+        flash('started ✓');
+      } else {
+        if (!repoPath) return;
+        const r = await fetch(`${API}/agent/activate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent: target, repo_path: repoPath, instruction: text.trim() }),
+        });
+        const d = await r.json();
+        flash(d.status === 'started' ? 'started ✓' : 'queued ✓');
+      }
     } finally { setBusy(false); }
   };
 
-  const onKey = (e) => { if (e.key === 'Enter') queue(); };
+  const onKey = (e) => { if (e.key === 'Enter') (isConsultant ? activate : queue)(); };
 
-  const isLive = agents[target]?.status === 'in_progress';
+  const targetLabel = target
+    ? (isConsultant ? 'consultant' : target)
+    : 'select agent';
 
   return html`
     <div class="compose-bar">
-      <span class="compose-label">PROMPT</span>
-      <select
-        class="compose-select"
-        value=${target}
-        onChange=${e => setTarget(e.target.value)}
-        disabled=${!agentOrder.length}
-      >
-        ${!agentOrder.length && html`<option value="">— no agents —</option>`}
-        ${agentOrder.map(n => {
-          const s = agents[n]?.status;
-          const label = s === 'in_progress' ? `${n} ●` : n;
-          return html`<option key=${n} value=${n}>${label}</option>`;
-        })}
-      </select>
+      <div class=${`compose-target${target ? (isConsultant ? ' is-consultant' : ' has-target') : ''}`}>
+        <span class="mi mi-sm">${isConsultant ? 'support_agent' : 'arrow_forward'}</span>
+        ${targetLabel}
+      </div>
       <input
         class="compose-input"
         type="text"
-        placeholder=${target ? (isLive ? `Message ${target} now…` : `Queue for ${target}…`) : 'Select an agent'}
+        placeholder=${target ? (isLive ? `Message ${target} now…` : `Ask ${target}…`) : 'Select an agent from the sidebar'}
         value=${text}
         onInput=${e => setText(e.target.value)}
         onKeyDown=${onKey}
-        disabled=${!agentOrder.length}
+        disabled=${!target}
       />
-      <button class="compose-send" onClick=${queue} disabled=${!canAct} title="Queue message (Enter)">
-        ${busy ? '…' : feedback || 'Queue'}
-      </button>
-      <button class="compose-run" onClick=${activate} disabled=${!canAct || !repoPath} title="Activate agent now">
-        ▶ Run
+      ${!isConsultant && html`
+        <button class="compose-send" onClick=${queue} disabled=${!canAct} title="Queue message (Enter)">
+          <span class="mi">inbox</span>
+          ${busy ? '…' : feedback || 'Queue'}
+        </button>
+      `}
+      <button class="compose-run" onClick=${activate} disabled=${!canAct || (!isConsultant && !repoPath)}
+        title=${isConsultant ? 'Ask consultant' : 'Activate agent now'}>
+        <span class="mi">play_arrow</span>
+        ${busy ? '…' : feedback || (isConsultant ? 'Ask' : 'Run')}
       </button>
     </div>
   `;
 }
 
-// ── OutputDrawer ────────────────────────────────────────────────────────────
+// ── OutputDrawer ─────────────────────────────────────────────────────────────
 
 function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
   const [selectedFile, setSelectedFile] = useState('');
   const [content, setContent]           = useState('');
   const [loading, setLoading]           = useState(false);
 
-  // Auto-select first file that loosely matches the agent name
   useEffect(() => {
     if (!files.length) { setSelectedFile(''); setContent(''); return; }
     const match = files.find(f => f.includes(selectedAgent)) ?? files[0];
@@ -646,210 +852,418 @@ function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
     <div class="drawer">
       <div class="drawer-header">
         <div class="drawer-title">${selectedAgent}</div>
-        <select
-          class="file-select"
-          value=${selectedFile}
-          onChange=${e => setSelectedFile(e.target.value)}
-        >
+        <select class="file-select" value=${selectedFile} onChange=${e => setSelectedFile(e.target.value)}>
           ${files.map(f => html`<option key=${f} value=${f}>${f}</option>`)}
         </select>
-        <button class="drawer-close" onClick=${onClose}>×</button>
+        <button class="drawer-close" onClick=${onClose}>
+          <span class="mi">close</span>
+        </button>
       </div>
       <div class="drawer-body">
         ${loading
           ? html`<span class="drawer-placeholder">Loading…</span>`
-          : content
-            ? content
-            : html`<span class="drawer-placeholder">No content.</span>`
+          : content || html`<span class="drawer-placeholder">No content.</span>`
         }
       </div>
     </div>
   `;
 }
 
-// ── App ─────────────────────────────────────────────────────────────────────
+// ── TabBar ────────────────────────────────────────────────────────────────────
+
+function TabBar({ pipelines, activeTab, onSelect, onNew }) {
+  return html`
+    <div class="tab-bar">
+      <button class=${`tab-btn${activeTab === 'overview' ? ' active' : ''}`} onClick=${() => onSelect('overview')}>
+        <span class="mi mi-sm">dashboard</span> Overview
+      </button>
+      ${pipelines.map(p => html`
+        <button key=${p.id} class=${`tab-btn${activeTab === p.id ? ' active' : ''}`} onClick=${() => onSelect(p.id)}>
+          <div class=${`tab-dot tab-dot--${p.status}`}></div>
+          ${p.label}
+          <span class="tab-id">#${p.id}</span>
+        </button>
+      `)}
+      <button class="tab-btn tab-btn--add" onClick=${onNew} title="New pipeline">
+        <span class="mi mi-sm">add</span>
+      </button>
+    </div>
+  `;
+}
+
+// ── OverviewTab ───────────────────────────────────────────────────────────────
+
+function OverviewTab({ pipelines, pipelineOrder, onSelect }) {
+  return html`
+    <div class="overview-tab">
+      <div class="overview-heading">Active Pipelines</div>
+      ${pipelineOrder.length === 0
+        ? html`<div class="overview-empty">No pipelines yet — click <strong>+</strong> to start one.</div>`
+        : html`
+          <table class="overview-table">
+            <thead><tr>
+              <th>ID</th><th>Project</th><th>Status</th><th>Active agent</th><th>Task</th>
+            </tr></thead>
+            <tbody>
+              ${pipelineOrder.map(id => {
+                const p = pipelines[id]; if (!p) return null;
+                const active = Object.entries(p.agents)
+                  .filter(([,s]) => s.status === 'in_progress').map(([n]) => n);
+                return html`
+                  <tr key=${id} class="overview-row" onClick=${() => onSelect(id)}>
+                    <td><code class="tab-id">#${id}</code></td>
+                    <td style="font-family:monospace;font-size:11px">${p.label}</td>
+                    <td><span class=${`status-pill status-pill--${p.status}`}>${p.status}</span></td>
+                    <td class="overview-agents">${active.length ? active.join(', ') : '—'}</td>
+                    <td class="overview-task">${p.task?.slice(0, 60)}${p.task?.length > 60 ? '…' : ''}</td>
+                  </tr>
+                `;
+              })}
+            </tbody>
+          </table>
+        `}
+    </div>
+  `;
+}
+
+// ── PipelineTab ───────────────────────────────────────────────────────────────
+
+function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
+                        onSkipToggle, onOverrideChange, onQueueNext, onResume }) {
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [filterAgent,   setFilterAgent]   = useState('');
+  const [autoScroll,    setAutoScroll]    = useState(true);
+  const [outputFiles,   setOutputFiles]   = useState([]);
+  const streamRef    = useRef(null);
+  const autoScrollRef= useRef(true);
+
+  useEffect(() => { autoScrollRef.current = autoScroll; }, [autoScroll]);
+
+  const allStream = useMemo(() => {
+    const merged = [...(pipeline?.stream ?? []), ...consultantEvents];
+    return merged.sort((a, b) => (a.ts < b.ts ? -1 : 1));
+  }, [pipeline?.stream, consultantEvents]);
+
+  useEffect(() => {
+    if (autoScrollRef.current && streamRef.current)
+      streamRef.current.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
+  }, [allStream]);
+
+  const handleStreamScroll = () => {
+    const el = streamRef.current; if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if ( atBottom && !autoScrollRef.current) { autoScrollRef.current = true;  setAutoScroll(true);  }
+    if (!atBottom &&  autoScrollRef.current) { autoScrollRef.current = false; setAutoScroll(false); }
+  };
+
+  useEffect(() => {
+    if (!selectedAgent || selectedAgent === 'consultant' || !pipeline?.repo_path || pipeline.status === 'queued') {
+      setOutputFiles([]); return;
+    }
+    fetch(`${API}/blackboard/list?repo_path=${encodeURIComponent(pipeline.repo_path)}`)
+      .then(r => r.json()).then(d => setOutputFiles(d.files ?? [])).catch(() => setOutputFiles([]));
+  }, [selectedAgent, pipeline?.repo_path]);
+
+  if (!pipeline) return html`<div class="body"><div class="stream-empty">Pipeline not found.</div></div>`;
+
+  const { id, repo_path, status, agents, agentOrder, skip_agents, agent_overrides, task } = pipeline;
+  const isQueued   = status === 'queued';
+  const isRunning  = status === 'running';
+
+  const pplStatuses  = PIPELINE_AGENTS.map(n => agents[n]?.status ?? 'idle');
+  const isResumable  = !isQueued
+    && repo_path
+    && pplStatuses.some(s => s === 'done' || s === 'failed')
+    && pplStatuses.every(s => s !== 'in_progress')
+    && !pplStatuses.every(s => s === 'done');
+
+  const allAgents = [...new Set([...agentOrder, 'consultant'])];
+  const visible   = filterAgent ? allStream.filter(e => e.agent === filterAgent) : allStream;
+
+  return html`
+    <div class="body">
+      <div class="sidebar">
+        <!-- Pipeline header -->
+        <div class="pipeline-tab-header">
+          <code class="tab-id">#${id}</code>
+          <span class=${`status-pill status-pill--${status}`}>${status}</span>
+          <span class="repo-label" title=${repo_path}>${pipeline.label}</span>
+        </div>
+
+        <div class="sidebar-section-heading">
+          <span class="mi mi-sm">schema</span> Pipeline
+        </div>
+
+        <!-- Actions -->
+        <div class="pipeline-actions">
+          ${isRunning && html`
+            <button class="action-btn action-btn--queue" onClick=${() => onQueueNext(repo_path)}>
+              <span class="mi">queue</span> Queue Next
+            </button>
+          `}
+          ${isResumable && html`
+            <button class="action-btn action-btn--resume" onClick=${() => onResume(pipeline)}>
+              <span class="mi">replay</span> Resume
+            </button>
+          `}
+        </div>
+        ${isQueued && html`
+          <div class="queued-hint">
+            <span class="mi mi-xs">schedule</span> Waiting for current pipeline to finish
+          </div>
+        `}
+
+        <${PipelineGraph}
+          agents=${agents}
+          agentOrder=${agentOrder}
+          selectedAgent=${selectedAgent}
+          skippedAgents=${skip_agents}
+          onSelect=${n => setSelectedAgent(prev => prev === n ? null : n)}
+          onSkipToggle=${n => onSkipToggle(id, n)}
+          showPrePrompts=${isQueued}
+          agentOverrides=${agent_overrides}
+          onOverrideChange=${(n, t) => onOverrideChange(id, n, t)}
+        />
+
+        <${ConsultantSection}
+          agentState=${consultantAgentState}
+          selected=${selectedAgent === 'consultant'}
+          onSelect=${n => setSelectedAgent(prev => prev === n ? null : n)}
+        />
+      </div>
+
+      <div class="right-panel">
+        <div class="stream-header">
+          <span class="stream-header-title">Activity</span>
+          <span class="mi mi-sm" style="color:var(--dim)">filter_list</span>
+          <select class="agent-filter" value=${filterAgent} onChange=${e => setFilterAgent(e.target.value)}>
+            <option value="">All agents</option>
+            ${allAgents.map(n => html`<option key=${n} value=${n}>${n}</option>`)}
+          </select>
+          <button
+            class=${`icon-btn${autoScroll ? ' active' : ''}`}
+            onClick=${() => { const n = !autoScroll; setAutoScroll(n); autoScrollRef.current = n; }}
+            title=${autoScroll ? 'Pause auto-scroll' : 'Resume auto-scroll'}
+          >
+            <span class="mi">${autoScroll ? 'pause' : 'play_arrow'}</span>
+          </button>
+        </div>
+
+        <div class="stream-panel" ref=${streamRef} onScroll=${handleStreamScroll}>
+          ${visible.length === 0
+            ? html`<div class="stream-empty">${isQueued ? 'Pipeline queued — waiting to start.' : 'Waiting for agent activity…'}</div>`
+            : visible.map(entry => html`<${StreamEntry} key=${entry._id} entry=${entry} />`)
+          }
+        </div>
+
+        <${ComposeBar}
+          target=${selectedAgent}
+          agents=${agents}
+          repoPath=${repo_path}
+        />
+
+        ${selectedAgent && selectedAgent !== 'consultant' && !isQueued && html`
+          <${OutputDrawer}
+            repoPath=${repo_path}
+            selectedAgent=${selectedAgent}
+            files=${outputFiles}
+            onClose=${() => setSelectedAgent(null)}
+          />
+        `}
+      </div>
+    </div>
+  `;
+}
+
+// ── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [repoPath, setRepoPath]         = useState(() => localStorage.getItem('repoPath') ?? '');
-  const [connected, setConnected]       = useState(false);
-  const [agents, setAgents]             = useState({});      // name → {status, currentTool}
-  const [agentOrder, setAgentOrder]     = useState([]);      // insertion order
-  const [stream, setStream]             = useState([]);      // log entries
-  const [selectedAgent, setSelectedAgent] = useState(null);
-  const [outputFiles, setOutputFiles]   = useState([]);
-  const [showNewProject, setShowNewProject] = useState(false);
+  const [defaultRepo,    setDefaultRepo]    = useState(() => localStorage.getItem('repoPath') ?? '');
+  const [connected,      setConnected]      = useState(false);
+  const [activeTab,      setActiveTab]      = useState('overview');
+  const [pipelines,      setPipelines]      = useState({});
+  const [pipelineOrder,  setPipelineOrder]  = useState([]);
+  const [consultantState, setConsultantState] = useState({ status: 'idle', currentTool: null });
+  const [consultantEvents, setConsultantEvents] = useState([]);
+  const [showModal,      setShowModal]      = useState(null); // null | {mode, defaultRepo}
 
-  const streamRef  = useRef(null);
-  const esRef      = useRef(null);
-  const entryId    = useRef(0);
+  const esRef              = useRef(null);
+  const entryId            = useRef(0);
+  const consultantEntryId  = useRef(0);
+  const updateTimers       = useRef({});
 
-  // Persist repo path
-  useEffect(() => { localStorage.setItem('repoPath', repoPath); }, [repoPath]);
+  // Persist default repo
+  useEffect(() => { localStorage.setItem('repoPath', defaultRepo); }, [defaultRepo]);
 
-  // Auto-scroll stream
+  // Load existing pipelines from server on mount
   useEffect(() => {
-    if (streamRef.current) {
-      const el = streamRef.current;
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      if (atBottom) el.scrollTop = el.scrollHeight;
-    }
-  }, [stream]);
-
-  // SSE connection
-  const connect = useCallback((path) => {
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    if (!path) { setConnected(false); return; }
-
-    const es = new EventSource(`${API}/stream?repo_path=${encodeURIComponent(path)}`);
-    esRef.current = es;
-
-    es.onopen    = () => setConnected(true);
-    es.onerror   = () => setConnected(false);
-    es.onmessage = (e) => {
-      let event;
-      try { event = JSON.parse(e.data); } catch { return; }
-      const { type, agent } = event;
-
-      // Update agent state
-      if (type === 'agent_start') {
-        setAgents(prev => ({ ...prev, [agent]: { status: 'in_progress', currentTool: null } }));
-        setAgentOrder(prev => prev.includes(agent) ? prev : [...prev, agent]);
-      } else if (type === 'tool_call') {
-        setAgents(prev => prev[agent]
-          ? { ...prev, [agent]: { ...prev[agent], currentTool: event.data } }
-          : prev
-        );
-      } else if (type === 'agent_done') {
-        setAgents(prev => prev[agent]
-          ? { ...prev, [agent]: { ...prev[agent], status: 'done', currentTool: null } }
-          : prev
-        );
-      } else if (type === 'agent_failed') {
-        setAgents(prev => prev[agent]
-          ? { ...prev, [agent]: { ...prev[agent], status: 'failed', currentTool: null } }
-          : prev
-        );
-      }
-
-      // Append to stream (cap at MAX_STREAM)
-      if (['agent_start','thinking','tool_call','agent_done','agent_failed'].includes(type)) {
-        setStream(prev => {
-          const next = [...prev, { ...event, _id: ++entryId.current }];
-          return next.length > MAX_STREAM ? next.slice(next.length - MAX_STREAM) : next;
-        });
-      }
-    };
-
-    return () => es.close();
+    fetch(`${API}/pipelines`)
+      .then(r => r.json())
+      .then(pls => {
+        const map = {}, order = [];
+        for (const pl of pls) {
+          map[pl.pipeline_id] = {
+            id: pl.pipeline_id, repo_path: pl.repo_path,
+            label: shortPath(pl.repo_path), status: pl.status,
+            task: pl.task_desc, skip_agents: new Set(pl.skip_agents),
+            agent_overrides: pl.agent_overrides ?? {},
+            agents: {}, agentOrder: [], stream: [],
+          };
+          order.push(pl.pipeline_id);
+        }
+        setPipelines(map); setPipelineOrder(order);
+      }).catch(() => {});
   }, []);
 
+  // Single unfiltered SSE connection — route events by pipeline_id
   useEffect(() => {
-    const cleanup = connect(repoPath);
-    return cleanup;
-  }, [repoPath]);
+    const es = new EventSource(`${API}/stream`);
+    esRef.current = es;
+    es.onopen  = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+    es.onmessage = (raw) => {
+      let ev; try { ev = JSON.parse(raw.data); } catch { return; }
+      const { type, agent, pipeline_id } = ev;
 
-  // Fetch initial status when repo path changes
-  useEffect(() => {
-    if (!repoPath) { setAgents({}); setAgentOrder([]); return; }
-    fetch(`${API}/status?repo_path=${encodeURIComponent(repoPath)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (!data?.steps) return;
-        const next = {};
-        const order = [];
-        for (const [name, info] of Object.entries(data.steps)) {
-          next[name] = { status: info.status ?? 'idle', currentTool: null };
-          order.push(name);
-        }
-        setAgents(next);
-        setAgentOrder(order);
-      })
-      .catch(() => {});
-  }, [repoPath]);
+      // Consultant — route to global consultant state
+      if (agent === 'consultant') {
+        if      (type === 'agent_start')  setConsultantState(s => ({...s, status: 'in_progress', currentTool: null}));
+        else if (type === 'tool_call')    setConsultantState(s => ({...s, currentTool: ev.data}));
+        else if (type === 'agent_done')   setConsultantState(s => ({...s, status: 'done',        currentTool: null}));
+        else if (type === 'agent_failed') setConsultantState(s => ({...s, status: 'failed',      currentTool: null}));
+        if (['agent_start','thinking','tool_call','agent_done','agent_failed','user_interrupt','message'].includes(type))
+          setConsultantEvents(prev => [...prev.slice(-300), {...ev, _id: ++consultantEntryId.current}]);
+        return;
+      }
 
-  // Fetch blackboard file list when agent is selected
-  useEffect(() => {
-    if (!selectedAgent || !repoPath) { setOutputFiles([]); return; }
-    fetch(`${API}/blackboard/list?repo_path=${encodeURIComponent(repoPath)}`)
-      .then(r => r.json())
-      .then(d => setOutputFiles(d.files ?? []))
-      .catch(() => setOutputFiles([]));
-  }, [selectedAgent, repoPath]);
+      // Pipeline status / queued events
+      if (type === 'pipeline_status') {
+        setPipelines(prev => {
+          const p = prev[pipeline_id]; if (!p) return prev;
+          return {...prev, [pipeline_id]: {...p, status: ev.data}};
+        });
+        return;
+      }
+      if (type === 'pipeline_queued') return; // handled by onCreated callback
 
-  const handleAgentClick = (name) => {
-    setSelectedAgent(prev => prev === name ? null : name);
+      // Per-pipeline agent events
+      if (!pipeline_id) return;
+      setPipelines(prev => {
+        const p = prev[pipeline_id]; if (!p) return prev;
+        let { agents, agentOrder, stream } = p;
+        if      (type === 'agent_start')  { agents = {...agents, [agent]: {status: 'in_progress', currentTool: null}}; if (!agentOrder.includes(agent)) agentOrder = [...agentOrder, agent]; }
+        else if (type === 'tool_call')    { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], currentTool: ev.data}}; }
+        else if (type === 'agent_done')   { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'done',   currentTool: null}}; }
+        else if (type === 'agent_failed') { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'failed', currentTool: null}}; }
+        if (['agent_start','thinking','tool_call','agent_done','agent_failed','user_interrupt','message'].includes(type))
+          stream = [...stream.slice(-MAX_STREAM + 1), {...ev, _id: ++entryId.current}];
+        return {...prev, [pipeline_id]: {...p, agents, agentOrder, stream}};
+      });
+    };
+    return () => { es.close(); esRef.current = null; };
+  }, []);
+
+  // Create a new pipeline tab after successful run/queue request
+  const handlePipelineCreated = (pipeline_id, repo_path, task_desc, isQueued, skip_agents, agent_overrides) => {
+    const p = {
+      id: pipeline_id, repo_path, label: shortPath(repo_path),
+      status: isQueued ? 'queued' : 'running', task: task_desc,
+      skip_agents: skip_agents ?? new Set(),
+      agent_overrides: agent_overrides ?? {},
+      agents: {}, agentOrder: [], stream: [],
+    };
+    setPipelines(prev => ({...prev, [pipeline_id]: p}));
+    setPipelineOrder(prev => [...prev, pipeline_id]);
+    setActiveTab(pipeline_id);
+    setShowModal(null);
+    setDefaultRepo(repo_path);
   };
 
-  const noRepo   = !repoPath;
-  const noAgents = agentOrder.length === 0;
-
-  const handlePipelineStarted = (newRepo) => {
-    setRepoPath(newRepo);
-    setAgents({});
-    setAgentOrder([]);
-    setStream([]);
+  // Skip toggle — updates state and debounces PATCH for queued pipelines
+  const handleSkipToggle = (pipeline_id, agent_name) => {
+    setPipelines(prev => {
+      const p = prev[pipeline_id]; if (!p) return prev;
+      const next = new Set(p.skip_agents);
+      next.has(agent_name) ? next.delete(agent_name) : next.add(agent_name);
+      const updated = {...p, skip_agents: next};
+      if (p.status === 'queued') schedulePatch(pipeline_id, updated);
+      return {...prev, [pipeline_id]: updated};
+    });
   };
+
+  // Pre-prompt change — updates state and debounces PATCH for queued pipelines
+  const handleOverrideChange = (pipeline_id, agent_name, text) => {
+    setPipelines(prev => {
+      const p = prev[pipeline_id]; if (!p) return prev;
+      const updated = {...p, agent_overrides: {...p.agent_overrides, [agent_name]: text}};
+      if (p.status === 'queued') schedulePatch(pipeline_id, updated);
+      return {...prev, [pipeline_id]: updated};
+    });
+  };
+
+  const schedulePatch = (pipeline_id, p) => {
+    clearTimeout(updateTimers.current[pipeline_id]);
+    updateTimers.current[pipeline_id] = setTimeout(() => {
+      fetch(`${API}/pipeline/update`, {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({pipeline_id, skip_agents: [...p.skip_agents], agent_overrides: p.agent_overrides}),
+      }).catch(() => {});
+    }, 600);
+  };
+
+  // Resume a pipeline
+  const handleResume = async (pipeline) => {
+    try {
+      const r = await fetch(`${API}/pipeline/resume`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo_path: pipeline.repo_path, skip_agents: [...pipeline.skip_agents]}),
+      });
+      const d = await r.json();
+      if (d.pipeline_id) handlePipelineCreated(d.pipeline_id, pipeline.repo_path, pipeline.task, false, new Set(), {});
+    } catch {}
+  };
+
+  const activePipeline = pipelines[activeTab];
 
   return html`
     <div class="root">
-      ${showNewProject && html`
-        <${NewProjectModal}
-          defaultRepo=${repoPath}
-          onClose=${() => setShowNewProject(false)}
-          onStarted=${handlePipelineStarted}
+      ${showModal && html`
+        <${PipelineModal}
+          mode=${showModal.mode}
+          defaultRepo=${showModal.defaultRepo ?? defaultRepo}
+          onClose=${() => setShowModal(null)}
+          onCreated=${handlePipelineCreated}
         />
       `}
 
-      <!-- Header -->
       <div class="header">
-        <div class="header-title">⬡ <span>Orchestration</span></div>
+        <div class="header-title">
+          <span class="mi">account_tree</span> Orchestration
+        </div>
         <div class="header-sep"></div>
-        <input
-          class="repo-input"
-          type="text"
-          placeholder="repo path, e.g. C:/projects/myapp"
-          value=${repoPath}
-          onInput=${e => setRepoPath(e.target.value)}
-        />
-        <div class=${`dot ${connected ? 'on' : 'off'}`} title=${connected ? 'Connected' : 'Disconnected'}></div>
+        <div class=${`conn-dot ${connected ? 'on' : 'off'}`} title=${connected ? 'Connected' : 'Disconnected'}></div>
       </div>
 
-      <!-- Body -->
-      <div class="body">
+      <${TabBar}
+        pipelines=${pipelineOrder.map(id => pipelines[id]).filter(Boolean)}
+        activeTab=${activeTab}
+        onSelect=${setActiveTab}
+        onNew=${() => setShowModal({mode: 'new', defaultRepo})}
+      />
 
-        <!-- Pipeline graph -->
-        <div class="agent-panel">
-          <div class="panel-heading">Pipeline</div>
-          <button class="new-btn" onClick=${() => setShowNewProject(true)}>+ New Pipeline Run</button>
-          <${PipelineGraph}
-            agents=${agents}
-            agentOrder=${agentOrder}
-            selectedAgent=${selectedAgent}
-            onSelect=${handleAgentClick}
-          />
-        </div>
-
-        <!-- Right: stream + drawer -->
-        <div class="right-panel">
-          <div class="stream-panel" ref=${streamRef}>
-            ${stream.length === 0
-              ? html`<div class="stream-empty">${noRepo ? 'Enter a repo path above to connect.' : 'Waiting for agent activity…'}</div>`
-              : stream.map(entry => html`<${StreamEntry} key=${entry._id} entry=${entry} />`)
-            }
-          </div>
-
-          <${ComposeBar} agents=${agents} agentOrder=${agentOrder} repoPath=${repoPath} />
-
-          ${selectedAgent && html`
-            <${OutputDrawer}
-              repoPath=${repoPath}
-              selectedAgent=${selectedAgent}
-              files=${outputFiles}
-              onClose=${() => setSelectedAgent(null)}
-            />
-          `}
-        </div>
-
+      <div class="tab-content">
+        ${activeTab === 'overview'
+          ? html`<${OverviewTab} pipelines=${pipelines} pipelineOrder=${pipelineOrder} onSelect=${setActiveTab} />`
+          : html`<${PipelineTab}
+              pipeline=${activePipeline}
+              consultantAgentState=${consultantState}
+              consultantEvents=${consultantEvents}
+              onSkipToggle=${handleSkipToggle}
+              onOverrideChange=${handleOverrideChange}
+              onQueueNext=${(repo) => setShowModal({mode: 'queue', defaultRepo: repo})}
+              onResume=${handleResume}
+            />`
+        }
       </div>
     </div>
   `;
