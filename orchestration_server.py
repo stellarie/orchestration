@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 import threading
 import uuid
@@ -152,11 +153,18 @@ class AgentControlRequest(BaseModel):
     action: str  # "skip" | "restart" | "pause"
 
 
+class GithubOutput(BaseModel):
+    repo:   str          # "owner/repo"
+    folder: str          # path inside the repo, e.g. "research/my-topic"
+    branch: str = "main"
+
+
 class ResearchRunRequest(BaseModel):
     repo_path:        str
     description:      str
     queue_dev:        bool = False   # auto-queue dev pipeline after research finishes
     dev_description:  str  = ""      # task for the queued dev pipeline (defaults to description)
+    github_output:    GithubOutput | None = None   # push research files to a GitHub repo
 
 
 class ScoutRunRequest(BaseModel):
@@ -197,6 +205,86 @@ def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data
         "data":        data,
         "ts":          datetime.now().isoformat(),
     })
+
+
+def _push_research_to_github(bb: "BlackBoard", github_output: "GithubOutput", topic: str) -> list[str]:
+    """Push research/* blackboard files to a GitHub repo via the Contents API.
+
+    Returns a list of paths successfully pushed.
+    """
+    import base64
+    import urllib.request
+    import urllib.error
+
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        logger.warning("[research→github] GITHUB_TOKEN not set — skipping push")
+        return []
+
+    repo   = github_output.repo
+    folder = github_output.folder.strip("/")
+    branch = github_output.branch
+
+    research_files = [
+        "research/queries.md",
+        "research/search-results-1.md",
+        "research/search-results-2.md",
+        "research/search-results-3.md",
+        "research/extracted-1.md",
+        "research/extracted-2.md",
+        "research/extracted-3.md",
+        "research/versions.md",
+        "research/caveats.md",
+        "research/brief.md",
+    ]
+
+    pushed = []
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept":        "application/vnd.github+json",
+        "Content-Type":  "application/json",
+        "User-Agent":    "orchestration-server",
+    }
+
+    for bb_path in research_files:
+        content = bb.read(bb_path)
+        if not content or content.startswith("["):
+            continue
+
+        filename  = bb_path.split("/")[-1]
+        api_path  = f"{folder}/{filename}"
+        api_url   = f"https://api.github.com/repos/{repo}/contents/{api_path}"
+        encoded   = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+        # Check if the file already exists (need its SHA to update)
+        sha = None
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                existing = json.loads(resp.read())
+                sha = existing.get("sha")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                logger.warning("[research→github] GET %s failed: %s", api_path, e)
+
+        payload: dict = {
+            "message": f"research: {topic[:60]} — {filename}",
+            "content": encoded,
+            "branch":  branch,
+        }
+        if sha:
+            payload["sha"] = sha
+
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            req  = urllib.request.Request(api_url, data=data, headers=headers, method="PUT")
+            with urllib.request.urlopen(req):
+                pushed.append(api_path)
+                logger.info("[research→github] pushed %s", api_path)
+        except urllib.error.HTTPError as e:
+            logger.warning("[research→github] PUT %s failed: %s", api_path, e)
+
+    return pushed
 
 
 def _write_handoff(entry: "PipelineEntry"):
@@ -856,6 +944,13 @@ def research_run(req: ResearchRunRequest):
                 _write_handoff(entry)
             except Exception:
                 pass
+            if req.github_output:
+                try:
+                    pushed = _push_research_to_github(bb, req.github_output, req.description)
+                    _emit_pipeline_event("research_pushed", pipeline_id, req.repo_path,
+                                        f"{req.github_output.repo}/{req.github_output.folder} ({len(pushed)} files)")
+                except Exception:
+                    logger.exception("[research→github] push failed for %s", pipeline_id)
         _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, final)
         _start_next_queued(req.repo_path)
 

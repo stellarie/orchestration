@@ -566,6 +566,10 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
   const [skipped,     setSkipped]     = useState(new Set());
   const [overrides,   setOverrides]   = useState({});
   const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
+  const [ghRepo,      setGhRepo]      = useState('stellarie/stella-research');
+  const [ghFolder,    setGhFolder]    = useState('');
+  const [ghBranch,    setGhBranch]    = useState('main');
+  const [pushGh,      setPushGh]      = useState(true);
   const [status,      setStatus]      = useState('');
   const [busy,        setBusy]        = useState(false);
 
@@ -580,8 +584,12 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
       let endpoint, body;
       if (isResearch) {
         endpoint = '/research/run';
-        body = { repo_path: repo.trim(), description: desc.trim(),
-                 queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim() };
+        const folder = ghFolder.trim() || desc.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+        body = {
+          repo_path: repo.trim(), description: desc.trim(),
+          queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim(),
+          ...(pushGh && ghRepo.trim() && { github_output: { repo: ghRepo.trim(), folder, branch: ghBranch.trim() || 'main' } }),
+        };
       } else if (isScout) {
         endpoint = '/scout/run';
         body = { repo_path: repo.trim(), description: desc.trim(),
@@ -640,6 +648,35 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
                 value=${devDesc} onInput=${e => setDevDesc(e.target.value)}></textarea>
             </div>
           `}
+        `}
+
+        ${isResearch && html`
+          <div style="border-top:1px solid var(--border);margin:8px 0;padding-top:10px">
+            <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
+              <label style="margin:0;white-space:nowrap">PUSH TO GITHUB</label>
+              <input type="checkbox" checked=${pushGh}
+                onChange=${e => setPushGh(e.target.checked)}
+                style="width:16px;height:16px;cursor:pointer;accent-color:var(--green)" />
+            </div>
+            ${pushGh && html`
+              <div class="modal-field">
+                <label>REPO</label>
+                <input type="text" placeholder="owner/repo"
+                  value=${ghRepo} onInput=${e => setGhRepo(e.target.value)} />
+              </div>
+              <div class="modal-field" style="flex-direction:row;gap:8px">
+                <div style="flex:1">
+                  <label>FOLDER (auto-generated from topic if blank)</label>
+                  <input type="text" placeholder="e.g. fastapi-v0.115"
+                    value=${ghFolder} onInput=${e => setGhFolder(e.target.value)} />
+                </div>
+                <div style="width:90px">
+                  <label>BRANCH</label>
+                  <input type="text" value=${ghBranch} onInput=${e => setGhBranch(e.target.value)} />
+                </div>
+              </div>
+            `}
+          </div>
         `}
 
         ${(!isResearch && !isScout) && html`
@@ -888,7 +925,8 @@ function StreamEntry({ entry }) {
   const { type, agent, data, ts } = entry;
   if (type === 'agent_start')  return html`<div class="entry entry-separator">${fmtTime(ts)} [${agent}] started</div>`;
   if (type === 'agent_done')   return html`<div class="entry entry-done"><span class="mi mi-xs">check_circle</span> ${fmtTime(ts)} [${agent}] done</div>`;
-  if (type === 'agent_failed') return html`<div class="entry entry-failed"><span class="mi mi-xs">error</span> ${fmtTime(ts)} [${agent}] failed</div>`;
+  if (type === 'agent_failed')    return html`<div class="entry entry-failed"><span class="mi mi-xs">error</span> ${fmtTime(ts)} [${agent}] failed</div>`;
+  if (type === 'research_pushed') return html`<div class="entry entry-done"><span class="mi mi-xs">cloud_upload</span> ${fmtTime(ts)} pushed to GitHub — ${data}</div>`;
   if (type === 'tool_call')    return html`
     <div class="entry entry-tool">
       <span class="ts">${fmtTime(ts)}</span>
@@ -1378,7 +1416,7 @@ function App() {
         else if (type === 'tool_call')    { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], currentTool: ev.data}}; }
         else if (type === 'agent_done')   { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'done',   currentTool: null}}; }
         else if (type === 'agent_failed') { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'failed', currentTool: null}}; }
-        if (['agent_start','thinking','tool_call','agent_done','agent_failed','user_interrupt','message'].includes(type))
+        if (['agent_start','thinking','tool_call','agent_done','agent_failed','user_interrupt','message','research_pushed'].includes(type))
           stream = [...stream.slice(-MAX_STREAM + 1), {...ev, _id: ++entryId.current}];
         return {...prev, [pipeline_id]: {...p, agents, agentOrder, stream}};
       });
