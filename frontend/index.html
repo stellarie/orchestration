@@ -251,6 +251,7 @@
     .pg-node--in_progress { border-color: var(--blue); background: rgba(56,139,253,.07); }
     .pg-node--done        { border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.04); }
     .pg-node--failed      { border-color: var(--red); background: rgba(248,81,73,.05); }
+    .pg-node--stopped     { border-color: rgba(139,148,158,.4); background: rgba(139,148,158,.05); opacity: .6; }
     .pg-node--skipped     { opacity: .4; border-style: dashed; }
 
     .pg-dot {
@@ -261,8 +262,9 @@
       background: var(--blue); box-shadow: 0 0 5px var(--blue);
       animation: pulse 1.2s ease-in-out infinite;
     }
-    .pg-node--done   .pg-dot { background: var(--green); }
-    .pg-node--failed .pg-dot { background: var(--red); }
+    .pg-node--done    .pg-dot { background: var(--green); }
+    .pg-node--failed  .pg-dot { background: var(--red); }
+    .pg-node--stopped .pg-dot { background: var(--dim); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
@@ -544,7 +546,7 @@ function shortPath(p) {
   return parts[parts.length - 1] || p;
 }
 
-const LABEL = { idle: 'idle', queued: 'queued', in_progress: 'running', done: 'done', failed: 'failed' };
+const LABEL = { idle: 'idle', queued: 'queued', in_progress: 'running', done: 'done', failed: 'failed', stopped: 'stopped' };
 
 const PIPELINE_AGENTS = [
   "architect", "designer", "planner", "scaffolder",
@@ -795,7 +797,7 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
                 ? html`<button class="agent-ctrl-btn agent-ctrl-btn--skip"
                     title="Skip this agent mid-run"
                     onClick=${() => onAgentControl?.(name, 'skip')}>skip</button>`
-                : (st === 'idle' || st === 'done') && html`<button class="agent-ctrl-btn agent-ctrl-btn--restart"
+                : (st === 'done' || st === 'failed') && html`<button class="agent-ctrl-btn agent-ctrl-btn--restart"
                     title="Restart this agent"
                     onClick=${() => onAgentControl?.(name, 'restart')}>restart</button>`
               }
@@ -830,21 +832,25 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
     if (step.type === 'parallel') {
       const key  = `p-${idx}`;
       const open = !collapsed[key];
-      const instances = Array.from({length: step.count}, (_, i) => `${step.agent}-p${i+1}`);
-      const groupStatus = instances.some(n => agents[n]?.status === 'in_progress' || agents[step.agent]?.status === 'in_progress')
-        ? 'in_progress' : (instances.some(n => agents[n]?.status === 'done') || agents[step.agent]?.status === 'done') ? 'done' : 'idle';
+      const baseStatus = agents[step.agent]?.status ?? 'idle';
+      const groupStatus = baseStatus;
       return html`
         <div key=${idx}>
           <div class="pg-step-group">
             <div class="pg-step-group-header" onClick=${() => toggleCollapse(key)}>
               <span class="mi">${open ? 'expand_more' : 'chevron_right'}</span>
-              <span>${step.agent} ×${step.count}</span>
-              ${step.reconcile && html`<span style="color:var(--purple);font-size:10px">+ reconciler</span>`}
-              <span class=${`pg-badge pg-badge--${groupStatus}`} style="margin-left:auto">${LABEL[groupStatus] ?? groupStatus}</span>
+              <span class="pg-badge pg-badge--${groupStatus}" style="margin-left:auto">${LABEL[groupStatus] ?? groupStatus}</span>
             </div>
             ${open && html`
               <div class="pg-step-group-body">
-                ${instances.map(n => renderNode(n, false))}
+                ${Array.from({length: step.count}, (_, i) => html`
+                  <div key=${i} class=${`pg-node pg-node--${baseStatus}`}>
+                    <div class="pg-dot"></div>
+                    <div class="pg-info"><div class="pg-name">${step.agent}</div>
+                      ${agents[step.agent]?.currentTool && html`<div class="pg-sub">${agents[step.agent].currentTool}</div>`}
+                    </div>
+                    <div class=${`pg-badge pg-badge--${baseStatus}`}>${LABEL[baseStatus] ?? baseStatus}</div>
+                  </div>`)}
                 ${step.reconcile && renderNode('reconciler', false)}
               </div>`}
           </div>
@@ -865,7 +871,6 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
           <div class="pg-step-group">
             <div class="pg-step-group-header" onClick=${() => toggleCollapse(key)}>
               <span class="mi">${open ? 'expand_more' : 'chevron_right'}</span>
-              <span>${names.join(' ‖ ')}</span>
               <span class=${`pg-badge pg-badge--${groupStatus}`} style="margin-left:auto">${LABEL[groupStatus] ?? groupStatus}</span>
             </div>
             ${open && html`
@@ -939,6 +944,7 @@ function StreamEntry({ entry }) {
   if (type === 'agent_start')  return html`<div class="entry entry-separator">${fmtTime(ts)} [${agent}] started</div>`;
   if (type === 'agent_done')   return html`<div class="entry entry-done"><span class="mi mi-xs">check_circle</span> ${fmtTime(ts)} [${agent}] done</div>`;
   if (type === 'agent_failed')    return html`<div class="entry entry-failed"><span class="mi mi-xs">error</span> ${fmtTime(ts)} [${agent}] failed</div>`;
+  if (type === 'agent_stopped')   return html`<div class="entry" style="color:var(--dim);font-size:11px;padding:2px 0"><span class="mi mi-xs">stop_circle</span> ${fmtTime(ts)} [${agent}] stopped</div>`;
   if (type === 'research_pushed') return html`<div class="entry entry-done"><span class="mi mi-xs">cloud_upload</span> ${fmtTime(ts)} pushed to GitHub — ${data}</div>`;
   if (type === 'tool_call')    return html`
     <div class="entry entry-tool">
@@ -1414,7 +1420,12 @@ function App() {
       if (type === 'pipeline_status') {
         setPipelines(prev => {
           const p = prev[pipeline_id]; if (!p) return prev;
-          return {...prev, [pipeline_id]: {...p, status: ev.data}};
+          const terminal = ['stopped', 'failed'].includes(ev.data);
+          const agents = terminal
+            ? Object.fromEntries(Object.entries(p.agents).map(([k, v]) =>
+                [k, v.status === 'in_progress' ? {...v, status: 'stopped', currentTool: null} : v]))
+            : p.agents;
+          return {...prev, [pipeline_id]: {...p, status: ev.data, agents}};
         });
         return;
       }
@@ -1425,11 +1436,12 @@ function App() {
       setPipelines(prev => {
         const p = prev[pipeline_id]; if (!p) return prev;
         let { agents, agentOrder, stream } = p;
-        if      (type === 'agent_start')  { agents = {...agents, [agent]: {status: 'in_progress', currentTool: null}}; if (!agentOrder.includes(agent)) agentOrder = [...agentOrder, agent]; }
-        else if (type === 'tool_call')    { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], currentTool: ev.data}}; }
-        else if (type === 'agent_done')   { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'done',   currentTool: null}}; }
-        else if (type === 'agent_failed') { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'failed', currentTool: null}}; }
-        if (['agent_start','thinking','tool_call','agent_done','agent_failed','user_interrupt','message','research_pushed'].includes(type))
+        if      (type === 'agent_start')   { agents = {...agents, [agent]: {status: 'in_progress', currentTool: null}}; if (!agentOrder.includes(agent)) agentOrder = [...agentOrder, agent]; }
+        else if (type === 'tool_call')     { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], currentTool: ev.data}}; }
+        else if (type === 'agent_done')    { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'done',    currentTool: null}}; }
+        else if (type === 'agent_failed')  { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'failed',  currentTool: null}}; }
+        else if (type === 'agent_stopped') { if (agents[agent]) agents = {...agents, [agent]: {...agents[agent], status: 'stopped', currentTool: null}}; }
+        if (['agent_start','thinking','tool_call','agent_done','agent_failed','agent_stopped','user_interrupt','message','research_pushed'].includes(type))
           stream = [...stream.slice(-MAX_STREAM + 1), {...ev, _id: ++entryId.current}];
         return {...prev, [pipeline_id]: {...p, agents, agentOrder, stream}};
       });

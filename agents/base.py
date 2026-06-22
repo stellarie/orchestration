@@ -158,7 +158,10 @@ class BaseAgent:
                          else TOOL_SCHEMAS)
             result = self._agentic_loop(messages, system, tools)
             self.session.save(self.NAME, self._strip_reasoning(messages))
-            self._emit("agent_done")
+            if result.get("status") == "stopped":
+                self._emit("agent_stopped")
+            else:
+                self._emit("agent_done")
             return result
         except Exception:
             self._emit("agent_failed")
