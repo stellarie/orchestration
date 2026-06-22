@@ -552,6 +552,7 @@ const PIPELINE_SET = new Set(PIPELINE_AGENTS);
 function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated }) {
   const isQueue    = mode === 'queue';
   const isResearch = mode === 'research';
+  const isScout    = mode === 'scout';
   const [repo,        setRepo]        = useState(defaultRepo ?? '');
   const [desc,        setDesc]        = useState('');
   const [devDesc,     setDevDesc]     = useState('');
@@ -573,6 +574,10 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
       let endpoint, body;
       if (isResearch) {
         endpoint = '/research/run';
+        body = { repo_path: repo.trim(), description: desc.trim(),
+                 queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim() };
+      } else if (isScout) {
+        endpoint = '/scout/run';
         body = { repo_path: repo.trim(), description: desc.trim(),
                  queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim() };
       } else {
@@ -601,7 +606,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
   return html`
     <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
       <div class="modal" style="max-height:90vh;overflow-y:auto">
-        <div class="modal-title">${isResearch ? 'Research + Dev' : isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
+        <div class="modal-title">${isScout ? 'OSS Scout' : isResearch ? 'Research + Dev' : isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
 
         <div class="modal-field">
           <label>REPO PATH</label>
@@ -610,12 +615,12 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
         </div>
 
         <div class="modal-field">
-          <label>${isResearch ? 'RESEARCH TOPIC' : 'TASK DESCRIPTION'}</label>
-          <textarea placeholder=${isResearch ? 'What to research — tech stack, libraries, version requirements…' : 'Describe what you want to build or change…'}
+          <label>${isScout ? 'SCOUT TOPIC' : isResearch ? 'RESEARCH TOPIC' : 'TASK DESCRIPTION'}</label>
+          <textarea placeholder=${isScout ? 'Interests, language, domain — e.g. "Python web frameworks, good first issue"' : isResearch ? 'What to research — tech stack, libraries, version requirements…' : 'Describe what you want to build or change…'}
             value=${desc} onInput=${e => setDesc(e.target.value)} onKeyDown=${onKey}></textarea>
         </div>
 
-        ${isResearch && html`
+        ${(isResearch || isScout) && html`
           <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
             <label style="margin:0;white-space:nowrap">AUTO-QUEUE DEV PIPELINE</label>
             <input type="checkbox" checked=${queueDev}
@@ -624,14 +629,14 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
           </div>
           ${queueDev && html`
             <div class="modal-field">
-              <label>DEV TASK (optional, defaults to research topic)</label>
-              <textarea placeholder="What to build after research completes…"
+              <label>${isScout ? 'DEV TASK (optional — overrides contribution brief)' : 'DEV TASK (optional, defaults to research topic)'}</label>
+              <textarea placeholder=${isScout ? 'Leave blank to use the contribution brief automatically…' : 'What to build after research completes…'}
                 value=${devDesc} onInput=${e => setDevDesc(e.target.value)}></textarea>
             </div>
           `}
         `}
 
-        ${!isResearch && html`
+        ${(!isResearch && !isScout) && html`
           <div class="modal-field">
             <label>SKIP AGENTS</label>
             <div class="skip-chips">
@@ -1043,7 +1048,7 @@ function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
 
 // ── TabBar ────────────────────────────────────────────────────────────────────
 
-function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch }) {
+function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout }) {
   return html`
     <div class="tab-bar">
       <button class=${`tab-btn${activeTab === 'overview' ? ' active' : ''}`} onClick=${() => onSelect('overview')}>
@@ -1062,6 +1067,10 @@ function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch }) {
       <button class="tab-btn tab-btn--add" onClick=${onResearch} title="Research + Dev pipeline"
         style="color:var(--purple);gap:3px">
         <span class="mi mi-sm">travel_explore</span>
+      </button>
+      <button class="tab-btn tab-btn--add" onClick=${onScout} title="OSS Scout pipeline"
+        style="color:var(--green,#4caf50);gap:3px">
+        <span class="mi mi-sm">search</span>
       </button>
     </div>
   `;
@@ -1481,6 +1490,7 @@ function App() {
         onSelect=${setActiveTab}
         onNew=${() => setShowModal({mode: 'new', defaultRepo})}
         onResearch=${() => setShowModal({mode: 'research', defaultRepo})}
+        onScout=${() => setShowModal({mode: 'scout', defaultRepo})}
       />
 
       <div class="tab-content">

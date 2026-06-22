@@ -39,6 +39,9 @@ from agents.reconciler import ReconcilerAgent
 from agents.consultant import ConsultantAgent
 from agents.judge import JudgeAgent
 from agents.query_planner import QueryPlannerAgent
+from agents.oss_scout import OssScoutAgent
+from agents.issue_auditor import IssueAuditorAgent
+from agents.contribution_planner import ContributionPlannerAgent
 from agents.searcher import SearcherAgent
 from agents.reader import ReaderAgent
 from agents.tech_auditor import TechAuditorAgent
@@ -64,7 +67,10 @@ AGENT_MAP = {
     "searcher":            SearcherAgent,
     "reader":              ReaderAgent,
     "tech-auditor":        TechAuditorAgent,
-    "research-synthesizer":ResearchSynthesizerAgent,
+    "research-synthesizer":  ResearchSynthesizerAgent,
+    "oss-scout":             OssScoutAgent,
+    "issue-auditor":         IssueAuditorAgent,
+    "contribution-planner":  ContributionPlannerAgent,
 }
 
 app = FastAPI(title="Orchestration Server", version="0.1.0")
@@ -151,6 +157,13 @@ class ResearchRunRequest(BaseModel):
     description:      str
     queue_dev:        bool = False   # auto-queue dev pipeline after research finishes
     dev_description:  str  = ""      # task for the queued dev pipeline (defaults to description)
+
+
+class ScoutRunRequest(BaseModel):
+    repo_path:        str            # workspace directory (not the cloned OSS repo)
+    description:      str            # topic / interests for the scout
+    queue_dev:        bool = False   # auto-queue dev pipeline once contribution-planner finishes
+    dev_description:  str  = ""      # override task desc for queued dev pipeline
 
 
 # ── Pipeline registry ────────────────────────────────────────────────────────
@@ -253,11 +266,30 @@ def _start_next_queued(repo_path: str):
 
     bb = BlackBoard(next_entry.repo_path)
 
-    # If a source pipeline is set, inject its handoff into the task description
+    # If a source pipeline is set, inject its handoff and apply scout repo path
     if next_entry.source_pipeline_id:
         src = _pipeline_registry.get(next_entry.source_pipeline_id)
         if src:
-            handoff = BlackBoard(src.repo_path).read("handoff.md")
+            src_bb = BlackBoard(src.repo_path)
+
+            # Scout→dev: read cloned repo path written by contribution-planner
+            cloned_path_raw = src_bb.read("scout/cloned_repo_path.md")
+            if cloned_path_raw and not cloned_path_raw.startswith("["):
+                cloned_path = cloned_path_raw.strip()
+                if cloned_path:
+                    next_entry.repo_path = cloned_path
+                    logger.info("[queue] scout handoff — routing dev pipeline to %s", cloned_path)
+                    # Prefer contribution-brief as the task description
+                    brief = src_bb.read("scout/contribution-brief.md")
+                    if brief and not brief.startswith("["):
+                        next_entry.task_desc = (
+                            f"{next_entry.task_desc}\n\n"
+                            f"---\n## Contribution brief from OSS scout\n\n"
+                            f"{brief[:8000]}"
+                        )
+
+            # General handoff.md injection (research pipeline or any other source)
+            handoff = src_bb.read("handoff.md")
             if handoff and not handoff.startswith("["):
                 next_entry.task_desc = (
                     f"{next_entry.task_desc}\n\n"
@@ -301,6 +333,12 @@ PIPELINE_STEPS = [
     "documentation",
 ]
 
+
+OSS_SCOUT_STEPS = [
+    "oss-scout",
+    "issue-auditor",
+    "contribution-planner",
+]
 
 RESEARCH_PIPELINE_STEPS = [
     "query-planner",
@@ -810,6 +848,68 @@ def research_run(req: ResearchRunRequest):
         _start_next_queued(req.repo_path)
 
     threading.Thread(target=_run_research, daemon=True, name=f"research-{pipeline_id}").start()
+    result = {"pipeline_id": pipeline_id, "status": "started"}
+    if dev_pid:
+        result["dev_pipeline_id"] = dev_pid
+    return result
+
+
+@app.post("/scout/run")
+def scout_run(req: ScoutRunRequest):
+    """Run the OSS scout pipeline, optionally queuing a dev pipeline after contribution-planner finishes."""
+    _ensure_repo(req.repo_path)
+    pipeline_id = str(uuid.uuid4())[:8]
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=req.description,
+        status="running",
+    )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
+
+    bb = BlackBoard(req.repo_path)
+    bb.init_task(pipeline_id, req.description)
+    bb.write("run-id",        pipeline_id)
+    bb.write("pipeline-step", "0")
+    _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
+
+    dev_pid = None
+    if req.queue_dev:
+        dev_pid = str(uuid.uuid4())[:8]
+        dev_desc = req.dev_description or req.description
+        dev_entry = PipelineEntry(
+            pipeline_id=dev_pid,
+            repo_path=req.repo_path,   # will be overridden by _start_next_queued after cloning
+            task_desc=dev_desc,
+            status="queued",
+            source_pipeline_id=pipeline_id,
+        )
+        with _reg_lock:
+            _pipeline_registry[dev_pid] = dev_entry
+            _pipeline_queues.setdefault(req.repo_path, []).append(dev_pid)
+        _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
+
+    def _run_scout():
+        try:
+            _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
+                                steps_override=OSS_SCOUT_STEPS)
+            final = "done"
+        except Exception:
+            logger.exception("[scout] %s crashed", pipeline_id)
+            final = "failed"
+        with _reg_lock:
+            if pipeline_id in _pipeline_registry:
+                _pipeline_registry[pipeline_id].status = final
+        if final == "done":
+            try:
+                _write_handoff(entry)
+            except Exception:
+                pass
+        _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, final)
+        _start_next_queued(req.repo_path)
+
+    threading.Thread(target=_run_scout, daemon=True, name=f"scout-{pipeline_id}").start()
     result = {"pipeline_id": pipeline_id, "status": "started"}
     if dev_pid:
         result["dev_pipeline_id"] = dev_pid

@@ -34,7 +34,11 @@ MODELS = {
     "searcher":            {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
     "reader":              {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
     "tech-auditor":        {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
-    "research-synthesizer":{"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "research-synthesizer":  {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    # ── OSS scout pipeline ────────────────────────────────────────────────────
+    "oss-scout":             {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
+    "issue-auditor":         {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
+    "contribution-planner":  {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
 }
 
 MAX_TOOL_ITERATIONS = 30  # fallback when agent not in AGENT_TOOL_ITERATIONS
@@ -63,7 +67,10 @@ AGENT_TOOL_ITERATIONS: dict[str, int] = {
     "searcher":            40,
     "reader":              40,
     "tech-auditor":        30,
-    "research-synthesizer":30,
+    "research-synthesizer":  30,
+    "oss-scout":             40,
+    "issue-auditor":         40,
+    "contribution-planner":  30,
 }
 
 # Max times the orchestrator may invoke the same agent across the whole pipeline run.
@@ -231,6 +238,19 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     },
     "research-synthesizer": {
         "tools":      {"read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    # ── OSS scout agents ──────────────────────────────────────────────────────
+    "oss-scout": {
+        "tools":      {"read_blackboard", "write_blackboard", "web_search", "github_search"},
+        "write_deny": [],
+    },
+    "issue-auditor": {
+        "tools":      {"read_blackboard", "write_blackboard", "github_search", "fetch_url"},
+        "write_deny": [],
+    },
+    "contribution-planner": {
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "run_command"},
         "write_deny": [],
     },
 }
