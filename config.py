@@ -35,6 +35,9 @@ MODELS = {
     "reader":              {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
     "tech-auditor":        {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
     "research-synthesizer":  {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    # ── research analysis stage (optional post-synthesis) ─────────────────────
+    "research-analyst":      {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 108000},
+    "action-planner":        {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 32000},
     # ── OSS scout pipeline ────────────────────────────────────────────────────
     "oss-scout":             {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
     "issue-auditor":         {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
@@ -68,6 +71,8 @@ AGENT_TOOL_ITERATIONS: dict[str, int] = {
     "reader":              40,
     "tech-auditor":        30,
     "research-synthesizer":  30,
+    "research-analyst":      30,
+    "action-planner":        20,
     "oss-scout":             40,
     "issue-auditor":         40,
     "contribution-planner":  30,
@@ -237,6 +242,14 @@ AGENT_CAPABILITIES: dict[str, dict] = {
         "write_deny": [],
     },
     "research-synthesizer": {
+        "tools":      {"read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    "research-analyst": {
+        "tools":      {"read_blackboard", "write_blackboard"},
+        "write_deny": [],
+    },
+    "action-planner": {
         "tools":      {"read_blackboard", "write_blackboard"},
         "write_deny": [],
     },

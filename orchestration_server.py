@@ -47,6 +47,8 @@ from agents.searcher import SearcherAgent
 from agents.reader import ReaderAgent
 from agents.tech_auditor import TechAuditorAgent
 from agents.research_synthesizer import ResearchSynthesizerAgent
+from agents.research_analyst import ResearchAnalystAgent
+from agents.action_planner import ActionPlannerAgent
 
 AGENT_MAP = {
     "architect":      ArchitectAgent,
@@ -69,6 +71,8 @@ AGENT_MAP = {
     "reader":              ReaderAgent,
     "tech-auditor":        TechAuditorAgent,
     "research-synthesizer":  ResearchSynthesizerAgent,
+    "research-analyst":      ResearchAnalystAgent,
+    "action-planner":        ActionPlannerAgent,
     "oss-scout":             OssScoutAgent,
     "issue-auditor":         IssueAuditorAgent,
     "contribution-planner":  ContributionPlannerAgent,
@@ -165,6 +169,7 @@ class ResearchRunRequest(BaseModel):
     queue_dev:        bool = False   # auto-queue dev pipeline after research finishes
     dev_description:  str  = ""      # task for the queued dev pipeline (defaults to description)
     github_output:    GithubOutput | None = None   # push research files to a GitHub repo
+    with_analysis:    bool = False   # add research-analyst + action-planner after synthesiser
 
 
 class ScoutRunRequest(BaseModel):
@@ -236,6 +241,8 @@ def _push_research_to_github(bb: "BlackBoard", github_output: "GithubOutput", to
         "research/versions.md",
         "research/caveats.md",
         "research/brief.md",
+        "research/analysis.md",
+        "research/action-plan.md",
     ]
 
     pushed = []
@@ -439,6 +446,11 @@ RESEARCH_PIPELINE_STEPS = [
     {"agent": "reader",    "count": 3, "reconcile": False},
     "tech-auditor",
     "research-synthesizer",
+]
+
+RESEARCH_ANALYSIS_STEPS = RESEARCH_PIPELINE_STEPS + [
+    "research-analyst",
+    "action-planner",
 ]
 
 
@@ -927,8 +939,9 @@ def research_run(req: ResearchRunRequest):
         stop_ev = threading.Event()
         _pipeline_stop_events[pipeline_id] = stop_ev
         try:
+            steps = RESEARCH_ANALYSIS_STEPS if req.with_analysis else RESEARCH_PIPELINE_STEPS
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
-                                steps_override=RESEARCH_PIPELINE_STEPS)
+                                steps_override=steps)
             ctrl = _pipeline_control.get(pipeline_id, "running")
             final = "stopped" if ctrl == "stopped" else "done"
         except Exception:

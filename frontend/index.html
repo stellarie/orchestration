@@ -566,10 +566,11 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
   const [skipped,     setSkipped]     = useState(new Set());
   const [overrides,   setOverrides]   = useState({});
   const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
-  const [ghRepo,      setGhRepo]      = useState('stellarie/stella-research');
-  const [ghFolder,    setGhFolder]    = useState('');
-  const [ghBranch,    setGhBranch]    = useState('main');
-  const [pushGh,      setPushGh]      = useState(true);
+  const [ghRepo,        setGhRepo]        = useState('stellarie/stella-research');
+  const [ghFolder,      setGhFolder]      = useState('');
+  const [ghBranch,      setGhBranch]      = useState('main');
+  const [pushGh,        setPushGh]        = useState(true);
+  const [withAnalysis,  setWithAnalysis]  = useState(false);
   const [status,      setStatus]      = useState('');
   const [busy,        setBusy]        = useState(false);
 
@@ -588,6 +589,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
         body = {
           repo_path: repo.trim(), description: desc.trim(),
           queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim(),
+          with_analysis: withAnalysis,
           ...(pushGh && ghRepo.trim() && { github_output: { repo: ghRepo.trim(), folder, branch: ghBranch.trim() || 'main' } }),
         };
       } else if (isScout) {
@@ -653,6 +655,17 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
         ${isResearch && html`
           <div style="border-top:1px solid var(--border);margin:8px 0;padding-top:10px">
             <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
+              <label style="margin:0;white-space:nowrap">DEEP ANALYSIS + ACTION PLAN</label>
+              <input type="checkbox" checked=${withAnalysis}
+                onChange=${e => setWithAnalysis(e.target.checked)}
+                style="width:16px;height:16px;cursor:pointer;accent-color:var(--orange,#f0883e)" />
+            </div>
+            ${withAnalysis && html`
+              <div style="font-size:11px;color:var(--dim);padding:2px 0 6px">
+                Adds <strong>research-analyst</strong> (confidence map, gaps, risks) and <strong>action-planner</strong> (prioritised action list) after synthesis.
+              </div>
+            `}
+            <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px;margin-top:6px">
               <label style="margin:0;white-space:nowrap">PUSH TO GITHUB</label>
               <input type="checkbox" checked=${pushGh}
                 onChange=${e => setPushGh(e.target.checked)}
