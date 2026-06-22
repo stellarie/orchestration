@@ -37,6 +37,7 @@ from agents.commit import CommitAgent
 from agents.documentation import DocumentationAgent
 from agents.reconciler import ReconcilerAgent
 from agents.consultant import ConsultantAgent
+from agents.judge import JudgeAgent
 
 AGENT_MAP = {
     "architect":      ArchitectAgent,
@@ -53,6 +54,7 @@ AGENT_MAP = {
     "documentation":  DocumentationAgent,
     "reconciler":     ReconcilerAgent,
     "consultant":     ConsultantAgent,
+    "judge":          JudgeAgent,
 }
 
 app = FastAPI(title="Orchestration Server", version="0.1.0")
@@ -408,18 +410,74 @@ def _run_pipeline_steps(
             instr += f"\n\nAngles covered by the drafts: {angles}"
         return _run_one("reconciler", instr, force_ds=False)  # always use Anthropic
 
-    def _check_sendback(agent_name: str):
-        content = bb.read(f"retry-request/{agent_name}.md")
-        if not content or content.startswith("["):
-            return
-        lines   = content.strip().splitlines()
-        target  = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("TARGET:")), None)
-        if not target or target not in AGENT_MAP:
-            return
-        issues  = "\n".join(l for l in lines if not l.startswith("TARGET:")).strip()
-        logger.info("[pipeline] send-back: %s → %s", agent_name, target)
-        bb.write(f"retry-request/{agent_name}.md", "")
-        _run_one(target, f"Rework requested by {agent_name}:\n\n{issues}", True)
+    JUDGE_MAX_ATTEMPTS = 5
+    FULL_AUTO_JUDGE    = True  # True = auto-pass after max attempts; False = pause for human
+
+    def _run_judge(agent_name: str, attempt: int) -> str:
+        """Run the judge after agent_name completed. Returns 'pass', 'rework:{critique}', or 'escalate'."""
+        outputs   = AGENT_OUTPUTS.get(agent_name, [])
+        retry_req = bb.read(f"retry-request/{agent_name}.md") or ""
+        if retry_req.startswith("["):
+            retry_req = ""
+        instr = (
+            f"Evaluate the output just produced by the '{agent_name}' agent (attempt {attempt+1}).\n\n"
+            f"Output files to check: {', '.join(outputs) if outputs else '(none — check blackboard manually)'}\n"
+            f"Also read: task.md, and retry-request/{agent_name}.md if it exists.\n\n"
+            + (f"Previous rework feedback (now addressed or not):\n{retry_req}\n\n" if retry_req else "")
+            + "Return PASS, REWORK {agent}: {critique}, or ESCALATE: {reason}."
+        )
+        try:
+            agent  = JudgeAgent(repo_path, pipeline_id=pipeline_id)
+            result = agent.run(instr)
+            verdict = (result.get("output") or "").strip()
+        except Exception:
+            logger.exception("[judge] crashed evaluating %s", agent_name)
+            verdict = "PASS"  # don't block pipeline on judge crash
+        bb.write(f"judge/{agent_name}-attempt{attempt+1}.md", verdict)
+        logger.info("[judge] %s attempt %d → %s", agent_name, attempt+1, verdict[:80])
+        return verdict
+
+    def _run_one_with_judge(agent_name: str, base_instruction: str, force_ds: bool, suffix: str = "") -> str:
+        """Run an agent, then judge its output, retrying up to JUDGE_MAX_ATTEMPTS."""
+        instruction = base_instruction
+        for attempt in range(JUDGE_MAX_ATTEMPTS):
+            status = _run_one(agent_name, instruction, force_ds, suffix)
+            if status in ("failed", "stopped", "skipped"):
+                return status
+
+            verdict = _run_judge(agent_name, attempt)
+
+            if verdict.upper().startswith("PASS"):
+                return "done"
+            elif verdict.upper().startswith("ESCALATE"):
+                reason = verdict.split(":", 1)[1].strip() if ":" in verdict else verdict
+                if FULL_AUTO_JUDGE:
+                    bb.write(f"judge-caveats/{agent_name}.md",
+                             f"Auto-passed after ESCALATE (attempt {attempt+1}/{JUDGE_MAX_ATTEMPTS}):\n{reason}")
+                    logger.warning("[judge] ESCALATE on %s — auto-passing (full-auto mode)", agent_name)
+                    return "done"
+                else:
+                    with _reg_lock:
+                        if pipeline_id in _pipeline_registry:
+                            _pipeline_registry[pipeline_id].status = "paused"
+                    _pipeline_control[pipeline_id] = "paused"
+                    _emit_pipeline_event("pipeline_status", pipeline_id, repo_path,
+                                        f"paused_escalated:{agent_name}:{reason[:120]}")
+                    _check_pipeline_control()  # blocks until resumed or stopped
+                    return _pipeline_control.get(pipeline_id, "running") == "stopped" and "stopped" or "done"
+            else:
+                # REWORK
+                critique = verdict.split(":", 1)[1].strip() if ":" in verdict else verdict
+                instruction = (
+                    f"Rework requested by judge (attempt {attempt+1}/{JUDGE_MAX_ATTEMPTS}):\n\n"
+                    f"{critique}\n\n---\n\n{base_instruction}"
+                )
+
+        # Exhausted attempts — auto-pass with caveat
+        bb.write(f"judge-caveats/{agent_name}.md",
+                 f"Max judge attempts ({JUDGE_MAX_ATTEMPTS}) reached. Proceeding with caveats.")
+        logger.warning("[judge] %s exhausted max attempts — auto-passing", agent_name)
+        return "done"
 
     angles_cache: list | None = None
 
@@ -435,11 +493,10 @@ def _run_pipeline_steps(
 
         if isinstance(step, str):
             # ── single agent ────────────────────────────────────────────────
-            status = _run_one(step, base_instr, True)
+            status = _run_one_with_judge(step, base_instr, True)
             if status in ("failed", "stopped"):
                 logger.warning("[pipeline] stopping at step %d (%s): %s", step_idx, step, status)
                 return
-            _check_sendback(step)
 
         elif isinstance(step, dict):
             # ── N parallel instances of same agent ───────────────────────────
@@ -448,10 +505,9 @@ def _run_pipeline_steps(
             reconcile  = step.get("reconcile", False)
 
             if count == 1:
-                status = _run_one(agent_name, base_instr, True)
+                status = _run_one_with_judge(agent_name, base_instr, True)
                 if status in ("failed", "stopped"):
                     return
-                _check_sendback(agent_name)
             else:
                 if agent_name == "architect":
                     angles_cache = _determine_angles(task_description)
@@ -471,6 +527,10 @@ def _run_pipeline_steps(
                     status = _reconcile(agent_name, count, angles_cache if agent_name == "architect" else None)
                     if status == "failed":
                         return
+                    # Judge the reconciled output
+                    verdict = _run_judge(agent_name, 0)
+                    if verdict.upper().startswith("ESCALATE"):
+                        logger.warning("[judge] escalate on reconciled %s output", agent_name)
 
         elif isinstance(step, list):
             # ── fan-out group (different agents / entries) ───────────────────
@@ -499,8 +559,12 @@ def _run_pipeline_steps(
                     if status == "failed":
                         return
 
+            # Judge each fan-out entry individually after the group completes
             for t in tasks:
-                _check_sendback(t["agent"])
+                if t.get("count", 1) == 1:
+                    verdict = _run_judge(t["agent"], 0)
+                    if verdict.upper().startswith("REWORK") or verdict.upper().startswith("ESCALATE"):
+                        logger.info("[judge] fan-out %s → %s", t["agent"], verdict[:60])
 
         bb.write("pipeline-step", str(step_idx + 1))
 

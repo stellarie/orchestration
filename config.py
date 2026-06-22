@@ -28,6 +28,7 @@ MODELS = {
     "commit":         {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "documentation":  {"model": "deepseek-v4-pro",  "provider": "deepseek",   "thinking": False},
     "consultant":     {"model": "claude-sonnet-4-6", "provider": "anthropic",  "thinking": True, "budget_tokens": 8000},
+    "judge":          {"model": "claude-opus-4-8",   "provider": "anthropic",  "thinking": True, "budget_tokens": 16000},
 }
 
 MAX_TOOL_ITERATIONS = 30  # fallback when agent not in AGENT_TOOL_ITERATIONS
@@ -51,6 +52,7 @@ AGENT_TOOL_ITERATIONS: dict[str, int] = {
     "code-reviewer":  30,
     "commit":         20,
     "documentation":  20,
+    "judge":          15,
 }
 
 # Max times the orchestrator may invoke the same agent across the whole pipeline run.
@@ -193,6 +195,10 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     },
     "consultant": {
         "tools":      {"list_files", "read_file", "read_blackboard"},
+        "write_deny": [],
+    },
+    "judge": {
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
         "write_deny": [],
     },
 }
