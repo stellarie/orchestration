@@ -113,10 +113,11 @@ class ConsultantAskRequest(BaseModel):
 
 
 class PipelineQueueRequest(BaseModel):
-    repo_path:       str
-    description:     str
-    skip_agents:     list[str] = []
-    agent_overrides: dict[str, str] = {}  # agent_name → extra instruction prepended at run-time
+    repo_path:          str
+    description:        str
+    skip_agents:        list[str] = []
+    agent_overrides:    dict[str, str] = {}  # agent_name → extra instruction prepended at run-time
+    source_pipeline_id: str = ""             # pass handoff.md from this pipeline into task context
 
 
 class PipelineUpdateRequest(BaseModel):
@@ -137,13 +138,14 @@ class AgentControlRequest(BaseModel):
 
 @dataclass
 class PipelineEntry:
-    pipeline_id:     str
-    repo_path:       str
-    task_desc:       str
-    status:          str  # 'running' | 'queued' | 'done' | 'failed'
-    skip_agents:     set  = dc_field(default_factory=set)
-    agent_overrides: dict = dc_field(default_factory=dict)
-    created_at:      str  = dc_field(default_factory=lambda: datetime.now().isoformat())
+    pipeline_id:        str
+    repo_path:          str
+    task_desc:          str
+    status:             str  # 'running' | 'queued' | 'done' | 'failed' | 'paused' | 'stopped'
+    skip_agents:        set  = dc_field(default_factory=set)
+    agent_overrides:    dict = dc_field(default_factory=dict)
+    source_pipeline_id: str  = ""   # inject handoff.md from this pipeline when starting
+    created_at:         str  = dc_field(default_factory=lambda: datetime.now().isoformat())
 
 
 _pipeline_registry: dict[str, PipelineEntry] = {}
@@ -162,6 +164,27 @@ def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data
         "data":        data,
         "ts":          datetime.now().isoformat(),
     })
+
+
+def _write_handoff(entry: "PipelineEntry"):
+    """Write a handoff.md summarising the pipeline's blackboard outputs for a queued successor."""
+    bb = BlackBoard(entry.repo_path)
+    lines = [
+        f"# Pipeline handoff — {entry.pipeline_id}",
+        f"Task: {entry.task_desc[:200]}",
+        "",
+        "## Outputs produced",
+    ]
+    for agent, files in AGENT_OUTPUTS.items():
+        for fname in files:
+            content = bb.read(fname)
+            if content and not content.startswith("["):
+                lines.append(f"\n### {fname} (from {agent})\n")
+                lines.append(content[:3000])
+                if len(content) > 3000:
+                    lines.append(f"\n… (truncated, {len(content)} chars total)")
+    bb.write("handoff.md", "\n".join(lines))
+    logger.info("[pipeline] handoff.md written for %s", entry.pipeline_id)
 
 
 def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
@@ -184,6 +207,12 @@ def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
         if entry.pipeline_id in _pipeline_registry:
             _pipeline_registry[entry.pipeline_id].status = final
 
+    if final == "done":
+        try:
+            _write_handoff(entry)
+        except Exception:
+            logger.warning("[pipeline] handoff write failed for %s", entry.pipeline_id)
+
     _emit_pipeline_event("pipeline_status", entry.pipeline_id, entry.repo_path, final)
     _start_next_queued(entry.repo_path)
 
@@ -204,6 +233,19 @@ def _start_next_queued(repo_path: str):
         return
 
     bb = BlackBoard(next_entry.repo_path)
+
+    # If a source pipeline is set, inject its handoff into the task description
+    if next_entry.source_pipeline_id:
+        src = _pipeline_registry.get(next_entry.source_pipeline_id)
+        if src:
+            handoff = BlackBoard(src.repo_path).read("handoff.md")
+            if handoff and not handoff.startswith("["):
+                next_entry.task_desc = (
+                    f"{next_entry.task_desc}\n\n"
+                    f"---\n## Context from previous pipeline ({src.pipeline_id})\n\n"
+                    f"{handoff[:6000]}"
+                )
+
     bb.init_task(next_entry.pipeline_id, next_entry.task_desc)
     bb.write("run-id",        next_entry.pipeline_id)
     bb.write("pipeline-step", "0")
@@ -661,6 +703,7 @@ def pipeline_queue(req: PipelineQueueRequest):
         status="queued",
         skip_agents=set(req.skip_agents),
         agent_overrides=req.agent_overrides,
+        source_pipeline_id=req.source_pipeline_id,
     )
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
@@ -731,13 +774,14 @@ def list_pipelines():
     with _reg_lock:
         return [
             {
-                "pipeline_id":     e.pipeline_id,
-                "repo_path":       e.repo_path,
-                "task_desc":       e.task_desc,
-                "status":          e.status,
-                "skip_agents":     list(e.skip_agents),
-                "agent_overrides": e.agent_overrides,
-                "created_at":      e.created_at,
+                "pipeline_id":        e.pipeline_id,
+                "repo_path":          e.repo_path,
+                "task_desc":          e.task_desc,
+                "status":             e.status,
+                "skip_agents":        list(e.skip_agents),
+                "agent_overrides":    e.agent_overrides,
+                "source_pipeline_id": e.source_pipeline_id,
+                "created_at":         e.created_at,
             }
             for e in _pipeline_registry.values()
         ]

@@ -533,14 +533,15 @@ const PIPELINE_SET = new Set(PIPELINE_AGENTS);
 
 // ── PipelineModal (new run + queue) ─────────────────────────────────────────
 
-function PipelineModal({ mode, defaultRepo, onClose, onCreated }) {
+function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated }) {
   const isQueue = mode === 'queue';
-  const [repo,      setRepo]      = useState(defaultRepo ?? '');
-  const [desc,      setDesc]      = useState('');
-  const [skipped,   setSkipped]   = useState(new Set());
-  const [overrides, setOverrides] = useState({});
-  const [status,    setStatus]    = useState('');
-  const [busy,      setBusy]      = useState(false);
+  const [repo,        setRepo]        = useState(defaultRepo ?? '');
+  const [desc,        setDesc]        = useState('');
+  const [skipped,     setSkipped]     = useState(new Set());
+  const [overrides,   setOverrides]   = useState({});
+  const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
+  const [status,      setStatus]      = useState('');
+  const [busy,        setBusy]        = useState(false);
 
   const toggleSkip = (name) => setSkipped(prev => {
     const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n;
@@ -556,6 +557,7 @@ function PipelineModal({ mode, defaultRepo, onClose, onCreated }) {
         description: desc.trim(),
         skip_agents: [...skipped],
         ...(isQueue && { agent_overrides: overrides }),
+        ...(isQueue && passOutputs && sourcePipelineId && { source_pipeline_id: sourcePipelineId }),
       };
       const r = await fetch(`${API}${endpoint}`, {
         method: 'POST',
@@ -596,6 +598,15 @@ function PipelineModal({ mode, defaultRepo, onClose, onCreated }) {
             `)}
           </div>
         </div>
+
+        ${isQueue && sourcePipelineId && html`
+          <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
+            <label style="margin:0;white-space:nowrap">PASS OUTPUTS FROM PREVIOUS PIPELINE</label>
+            <input type="checkbox" checked=${passOutputs}
+              onChange=${e => setPassOutputs(e.target.checked)}
+              style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue)" />
+          </div>
+        `}
 
         ${isQueue && html`
           <div class="modal-field">
@@ -1062,7 +1073,7 @@ function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
         <!-- Actions -->
         <div class="pipeline-actions">
           ${isRunning && html`
-            <button class="action-btn action-btn--queue" onClick=${() => onQueueNext(repo_path)}>
+            <button class="action-btn action-btn--queue" onClick=${() => onQueueNext(repo_path, id)}>
               <span class="mi">queue</span> Queue Next
             </button>
           `}
@@ -1325,6 +1336,7 @@ function App() {
         <${PipelineModal}
           mode=${showModal.mode}
           defaultRepo=${showModal.defaultRepo ?? defaultRepo}
+          sourcePipelineId=${showModal.sourcePipelineId ?? ''}
           onClose=${() => setShowModal(null)}
           onCreated=${handlePipelineCreated}
         />
@@ -1354,7 +1366,7 @@ function App() {
               consultantEvents=${consultantEvents}
               onSkipToggle=${handleSkipToggle}
               onOverrideChange=${handleOverrideChange}
-              onQueueNext=${(repo) => setShowModal({mode: 'queue', defaultRepo: repo})}
+              onQueueNext=${(repo, pid) => setShowModal({mode: 'queue', defaultRepo: repo, sourcePipelineId: pid})}
               onResume=${handleResume}
               onControl=${handleControl}
               onAgentControl=${handleAgentControl}
