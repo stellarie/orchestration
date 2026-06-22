@@ -150,6 +150,32 @@
       opacity: .8;
     }
 
+    /* ── pipeline runtime controls ── */
+    .pipeline-controls {
+      display: flex; gap: 4px; margin-left: auto; flex-shrink: 0;
+    }
+    .ctrl-btn {
+      display: flex; align-items: center; gap: 2px;
+      padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 500;
+      cursor: pointer; border: 1px solid; transition: background .15s;
+    }
+    .ctrl-btn .mi { font-size: 13px; }
+    .ctrl-btn--pause  { background: rgba(210,153,34,.1); border-color: rgba(210,153,34,.3); color: var(--yellow); }
+    .ctrl-btn--pause:hover  { background: rgba(210,153,34,.25); }
+    .ctrl-btn--resume { background: rgba(63,185,80,.1);  border-color: rgba(63,185,80,.3);  color: var(--green); }
+    .ctrl-btn--resume:hover { background: rgba(63,185,80,.25); }
+    .ctrl-btn--stop   { background: rgba(248,81,73,.1);  border-color: rgba(248,81,73,.3);  color: var(--red); }
+    .ctrl-btn--stop:hover   { background: rgba(248,81,73,.25); }
+    .agent-ctrl { display: flex; gap: 3px; margin-left: auto; }
+    .agent-ctrl-btn {
+      padding: 2px 5px; border-radius: 4px; font-size: 10px; font-weight: 500;
+      cursor: pointer; border: 1px solid; line-height: 1.4; transition: background .12s;
+    }
+    .agent-ctrl-btn--skip    { background: rgba(210,153,34,.1); border-color: rgba(210,153,34,.3); color: var(--yellow); }
+    .agent-ctrl-btn--skip:hover    { background: rgba(210,153,34,.25); }
+    .agent-ctrl-btn--restart { background: rgba(56,139,253,.1);  border-color: rgba(56,139,253,.3); color: var(--blue); }
+    .agent-ctrl-btn--restart:hover { background: rgba(56,139,253,.25); }
+
     /* ── overview tab ── */
     .overview-tab { padding: 24px 28px; overflow-y: auto; flex: 1; }
     .overview-heading { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text); }
@@ -606,13 +632,15 @@ function PipelineModal({ mode, defaultRepo, onClose, onCreated }) {
 // ── PipelineGraph ────────────────────────────────────────────────────────────
 
 function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSelect, onSkipToggle,
-                          showPrePrompts, agentOverrides, onOverrideChange }) {
+                          showPrePrompts, agentOverrides, onOverrideChange,
+                          isRunning, onAgentControl }) {
   const independents = agentOrder.filter(n => !PIPELINE_SET.has(n) && n !== 'consultant');
 
   const renderNode = (name, showSkip = false) => {
     const ag      = agents[name] ?? {};
     const st      = ag.status ?? 'idle';
     const skipped = skippedAgents?.has(name) ?? false;
+    const isActive = st === 'in_progress';
     return html`
       <div key=${name}>
         <div
@@ -636,6 +664,18 @@ function PipelineGraph({ agents, agentOrder, selectedAgent, skippedAgents, onSel
             >
               <span class="mi">${skipped ? 'do_not_disturb_on' : 'skip_next'}</span>
             </button>
+          `}
+          ${isRunning && !showSkip && html`
+            <div class="agent-ctrl" onClick=${e => e.stopPropagation()}>
+              ${isActive
+                ? html`<button class="agent-ctrl-btn agent-ctrl-btn--skip"
+                    title="Skip this agent mid-run"
+                    onClick=${() => onAgentControl?.(name, 'skip')}>skip</button>`
+                : (st === 'idle' || st === 'done') && html`<button class="agent-ctrl-btn agent-ctrl-btn--restart"
+                    title="Restart this agent"
+                    onClick=${() => onAgentControl?.(name, 'restart')}>restart</button>`
+              }
+            </div>
           `}
         </div>
         ${showPrePrompts && !skipped && html`
@@ -929,7 +969,8 @@ function OverviewTab({ pipelines, pipelineOrder, onSelect }) {
 // ── PipelineTab ───────────────────────────────────────────────────────────────
 
 function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
-                        onSkipToggle, onOverrideChange, onQueueNext, onResume }) {
+                        onSkipToggle, onOverrideChange, onQueueNext, onResume,
+                        onControl, onAgentControl }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [filterAgent,   setFilterAgent]   = useState('');
   const [autoScroll,    setAutoScroll]    = useState(true);
@@ -988,6 +1029,30 @@ function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
           <code class="tab-id">#${id}</code>
           <span class=${`status-pill status-pill--${status}`}>${status}</span>
           <span class="repo-label" title=${repo_path}>${pipeline.label}</span>
+          ${isRunning && html`
+            <div class="pipeline-controls">
+              <button class="ctrl-btn ctrl-btn--pause" title="Pause after current step"
+                onClick=${() => onControl?.(id, 'pause')}>
+                <span class="mi">pause</span>
+              </button>
+              <button class="ctrl-btn ctrl-btn--stop" title="Stop pipeline immediately"
+                onClick=${() => onControl?.(id, 'stop')}>
+                <span class="mi">stop</span>
+              </button>
+            </div>
+          `}
+          ${status === 'paused' && html`
+            <div class="pipeline-controls">
+              <button class="ctrl-btn ctrl-btn--resume" title="Resume pipeline"
+                onClick=${() => onControl?.(id, 'resume')}>
+                <span class="mi">play_arrow</span>
+              </button>
+              <button class="ctrl-btn ctrl-btn--stop" title="Stop pipeline"
+                onClick=${() => onControl?.(id, 'stop')}>
+                <span class="mi">stop</span>
+              </button>
+            </div>
+          `}
         </div>
 
         <div class="sidebar-section-heading">
@@ -1023,6 +1088,8 @@ function PipelineTab({ pipeline, consultantAgentState, consultantEvents,
           showPrePrompts=${isQueued}
           agentOverrides=${agent_overrides}
           onOverrideChange=${(n, t) => onOverrideChange(id, n, t)}
+          isRunning=${isRunning}
+          onAgentControl=${(agent, action) => onAgentControl?.(id, agent, action)}
         />
 
         <${ConsultantSection}
@@ -1211,6 +1278,33 @@ function App() {
     }, 600);
   };
 
+  // Pause / resume / stop a pipeline
+  const handleControl = async (pipeline_id, action) => {
+    try {
+      const r = await fetch(`${API}/pipeline/${pipeline_id}/control`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action}),
+      });
+      const d = await r.json();
+      if (d.status) {
+        setPipelines(prev => {
+          const p = prev[pipeline_id]; if (!p) return prev;
+          return {...prev, [pipeline_id]: {...p, status: d.status}};
+        });
+      }
+    } catch {}
+  };
+
+  // Skip / restart a specific agent in a pipeline
+  const handleAgentControl = async (pipeline_id, agent, action) => {
+    try {
+      await fetch(`${API}/pipeline/${pipeline_id}/agent/${agent}/control`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action}),
+      });
+    } catch {}
+  };
+
   // Resume a pipeline
   const handleResume = async (pipeline) => {
     try {
@@ -1262,6 +1356,8 @@ function App() {
               onOverrideChange=${handleOverrideChange}
               onQueueNext=${(repo) => setShowModal({mode: 'queue', defaultRepo: repo})}
               onResume=${handleResume}
+              onControl=${handleControl}
+              onAgentControl=${handleAgentControl}
             />`
         }
       </div>

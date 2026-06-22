@@ -125,6 +125,14 @@ class PipelineUpdateRequest(BaseModel):
     agent_overrides: dict[str, str] = {}
 
 
+class PipelineControlRequest(BaseModel):
+    action: str  # "pause" | "resume" | "stop"
+
+
+class AgentControlRequest(BaseModel):
+    action: str  # "skip" | "restart" | "pause"
+
+
 # ── Pipeline registry ────────────────────────────────────────────────────────
 
 @dataclass
@@ -140,6 +148,8 @@ class PipelineEntry:
 
 _pipeline_registry: dict[str, PipelineEntry] = {}
 _pipeline_queues:   dict[str, list]           = {}   # repo_path → ordered list of queued pipeline_ids
+_pipeline_control:  dict[str, str]            = {}   # pipeline_id → "running"|"paused"|"stopped"
+_agent_control:     dict[str, str]            = {}   # "{pipeline_id}:{agent}" → "skip"|"restart"
 _reg_lock = threading.Lock()
 
 
@@ -157,12 +167,15 @@ def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data
 def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
     """Wrapper that runs a pipeline and handles queue advancement on finish."""
     _ensure_repo(entry.repo_path, entry.pipeline_id, entry.repo_path)
+    with _reg_lock:
+        _pipeline_control[entry.pipeline_id] = "running"
     try:
         _run_pipeline_steps(
             entry.repo_path, entry.task_desc, start_step,
             entry.skip_agents, entry.pipeline_id, entry.agent_overrides,
         )
-        final = "done"
+        ctrl = _pipeline_control.get(entry.pipeline_id, "running")
+        final = "stopped" if ctrl == "stopped" else "done"
     except Exception:
         logger.exception("[pipeline] %s crashed", entry.pipeline_id)
         final = "failed"
@@ -297,7 +310,29 @@ def _run_pipeline_steps(
             logger.info("[pipeline] waiting for %s to finish independent run", agent_name)
             time.sleep(2)
 
+    def _check_pipeline_control() -> str:
+        """Return current control state; block while paused. Returns 'stopped' to abort."""
+        while True:
+            ctrl = _pipeline_control.get(pipeline_id, "running")
+            if ctrl == "stopped":
+                return "stopped"
+            if ctrl != "paused":
+                return ctrl
+            time.sleep(1)
+
     def _run_one(agent_name: str, instruction: str, force_ds: bool, suffix: str = "") -> str:
+        ctrl = _check_pipeline_control()
+        if ctrl == "stopped":
+            return "stopped"
+
+        agent_key = f"{pipeline_id}:{agent_name}"
+        action = _agent_control.pop(agent_key, None)
+        if action == "skip":
+            logger.info("[pipeline] skipping %s by user request", agent_name)
+            bb.update_status(agent_name, "skipped")
+            _emit_pipeline_event("agent_skipped", pipeline_id, repo_path, agent_name)
+            return "done"
+
         _wait_if_active(agent_name)
         override = agent_overrides.get(agent_name, "").strip()
         if override:
@@ -359,10 +394,10 @@ def _run_pipeline_steps(
         if isinstance(step, str):
             # ── single agent ────────────────────────────────────────────────
             status = _run_one(step, base_instr, True)
-            _check_sendback(step)
-            if status == "failed":
-                logger.warning("[pipeline] stopping at step %d (%s)", step_idx, step)
+            if status in ("failed", "stopped"):
+                logger.warning("[pipeline] stopping at step %d (%s): %s", step_idx, step, status)
                 return
+            _check_sendback(step)
 
         elif isinstance(step, dict):
             # ── N parallel instances of same agent ───────────────────────────
@@ -372,9 +407,9 @@ def _run_pipeline_steps(
 
             if count == 1:
                 status = _run_one(agent_name, base_instr, True)
-                _check_sendback(agent_name)
-                if status == "failed":
+                if status in ("failed", "stopped"):
                     return
+                _check_sendback(agent_name)
             else:
                 if agent_name == "architect":
                     angles_cache = _determine_angles(task_description)
@@ -386,8 +421,8 @@ def _run_pipeline_steps(
                     futures  = [pool.submit(_run_one, agent_name, instrs[i], True, f"-p{i+1}") for i in range(count)]
                     statuses = [f.result() for f in futures]
 
-                if any(s == "failed" for s in statuses):
-                    logger.warning("[pipeline] parallel %s had failures", agent_name)
+                if any(s in ("failed", "stopped") for s in statuses):
+                    logger.warning("[pipeline] parallel %s had failures/stop", agent_name)
                     return
 
                 if reconcile:
@@ -411,8 +446,8 @@ def _run_pipeline_steps(
 
                 results = [(t, f.result()) for t, f in futures]
 
-            if any(status == "failed" for _, status in results):
-                logger.warning("[pipeline] fan-out group had failures at step %d", step_idx)
+            if any(status in ("failed", "stopped") for _, status in results):
+                logger.warning("[pipeline] fan-out group had failures/stop at step %d", step_idx)
                 return
 
             # Reconcile entries that need it
@@ -648,6 +683,46 @@ def pipeline_update(req: PipelineUpdateRequest):
         entry.skip_agents    = set(req.skip_agents)
         entry.agent_overrides = req.agent_overrides
     return {"status": "updated"}
+
+
+@app.post("/pipeline/{pipeline_id}/control")
+def pipeline_control(pipeline_id: str, req: PipelineControlRequest):
+    """Pause, resume, or stop a running pipeline."""
+    with _reg_lock:
+        entry = _pipeline_registry.get(pipeline_id)
+        if not entry:
+            raise HTTPException(404, f"Pipeline '{pipeline_id}' not found")
+        if req.action == "pause":
+            _pipeline_control[pipeline_id] = "paused"
+            entry.status = "paused"
+        elif req.action == "resume":
+            _pipeline_control[pipeline_id] = "running"
+            if entry.status == "paused":
+                entry.status = "running"
+        elif req.action == "stop":
+            _pipeline_control[pipeline_id] = "stopped"
+            entry.status = "stopped"
+            interrupt_bus.send_stop(pipeline_id) if hasattr(interrupt_bus, "send_stop") else None
+        else:
+            raise HTTPException(400, f"Unknown action '{req.action}'")
+    _emit_pipeline_event("pipeline_status", pipeline_id, entry.repo_path, entry.status)
+    return {"pipeline_id": pipeline_id, "status": entry.status}
+
+
+@app.post("/pipeline/{pipeline_id}/agent/{agent_name}/control")
+def agent_control(pipeline_id: str, agent_name: str, req: AgentControlRequest):
+    """Skip, restart, or pause a specific agent in a running pipeline."""
+    with _reg_lock:
+        entry = _pipeline_registry.get(pipeline_id)
+        if not entry:
+            raise HTTPException(404, f"Pipeline '{pipeline_id}' not found")
+        if req.action not in ("skip", "restart", "pause"):
+            raise HTTPException(400, f"Unknown action '{req.action}'")
+        if req.action == "pause":
+            interrupt_bus.send(agent_name, "__pause__")
+        else:
+            _agent_control[f"{pipeline_id}:{agent_name}"] = req.action
+    return {"pipeline_id": pipeline_id, "agent": agent_name, "action": req.action}
 
 
 @app.get("/pipelines")
