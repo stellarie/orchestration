@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -38,6 +39,56 @@ def _path_matches_deny(path: str, pattern: str) -> bool:
         return fnmatch(filename, suffix_pat)
 
     return fnmatch(p, pat)
+
+_WEB_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Search the web using Tavily. Returns titles, URLs, and snippet content for the top results.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query":       {"type": "string", "description": "Search query"},
+                "max_results": {"type": "integer", "description": "Max results to return (default 8, max 20)"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_FETCH_URL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fetch_url",
+        "description": "Fetch the text content of a URL (HTML stripped to readable text, truncated to 20k chars).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url":     {"type": "string", "description": "Full URL to fetch"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default 20)"},
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_GITHUB_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "github_search",
+        "description": "Search GitHub for repositories or issues via the GitHub REST API.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "GitHub search query (supports qualifiers like language:python, label:good-first-issue)"},
+                "type":  {"type": "string", "description": "'repositories' or 'issues' (default: repositories)"},
+                "sort":  {"type": "string", "description": "Sort field: stars, forks, updated, created (default: stars)"},
+                "max_results": {"type": "integer", "description": "Max results (default 10, max 30)"},
+            },
+            "required": ["query"],
+        },
+    },
+}
 
 TOOL_SCHEMAS = [
     {
@@ -166,6 +217,9 @@ _ALL_TOOL_SCHEMAS: dict[str, dict] = {
     t["function"]["name"]: t for t in TOOL_SCHEMAS
 }
 _ALL_TOOL_SCHEMAS["read_contract_file"] = _READ_CONTRACT_FILE_SCHEMA
+_ALL_TOOL_SCHEMAS["web_search"]         = _WEB_SEARCH_SCHEMA
+_ALL_TOOL_SCHEMAS["fetch_url"]          = _FETCH_URL_SCHEMA
+_ALL_TOOL_SCHEMAS["github_search"]      = _GITHUB_SEARCH_SCHEMA
 
 
 def build_tool_schemas(tool_names: set[str]) -> list[dict]:
@@ -200,6 +254,13 @@ class ToolExecutor:
                 return f"Written to blackboard: {args['filename']}"
             elif name == "run_command":
                 return self._run_command(args["command"], args.get("timeout", 60))
+            elif name == "web_search":
+                return self._web_search(args["query"], args.get("max_results", 8))
+            elif name == "fetch_url":
+                return self._fetch_url(args["url"], args.get("timeout", 20))
+            elif name == "github_search":
+                return self._github_search(args["query"], args.get("type", "repositories"),
+                                           args.get("sort", "stars"), args.get("max_results", 10))
             else:
                 return f"Unknown tool: {name}"
         except Exception as e:
@@ -265,3 +326,80 @@ class ToolExecutor:
             parts.append(f"STDERR:\n{result.stderr}")
         parts.append(f"Exit code: {result.returncode}")
         return "\n".join(parts)
+
+    def _web_search(self, query: str, max_results: int = 8) -> str:
+        api_key = os.getenv("TAVILY_API_KEY")
+        if not api_key:
+            return "[web_search] TAVILY_API_KEY not set. Add it to .env to enable web search."
+        try:
+            import urllib.request, json as _json
+            max_results = min(max_results, 20)
+            payload = _json.dumps({"api_key": api_key, "query": query, "max_results": max_results}).encode()
+            req = urllib.request.Request(
+                "https://api.tavily.com/search",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = _json.loads(resp.read())
+            results = data.get("results", [])
+            lines = [f"Query: {query}\n"]
+            for i, r in enumerate(results, 1):
+                lines.append(f"{i}. {r.get('title', '')}\n   URL: {r.get('url', '')}\n   {r.get('content', '')[:400]}\n")
+            return "\n".join(lines) if results else "No results found."
+        except Exception as e:
+            return f"[web_search] Error: {e}"
+
+    def _fetch_url(self, url: str, timeout: int = 20) -> str:
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (research-agent)"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+                ct  = resp.headers.get("Content-Type", "")
+            text = raw.decode("utf-8", errors="replace")
+            if "html" in ct.lower():
+                text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r"<style[^>]*>.*?</style>",  "", text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"[ \t]+", " ", text)
+                text = re.sub(r"\n{3,}", "\n\n", text).strip()
+            return text[:20000]
+        except Exception as e:
+            return f"[fetch_url] Error fetching {url}: {e}"
+
+    def _github_search(self, query: str, type: str = "repositories",
+                       sort: str = "stars", max_results: int = 10) -> str:
+        try:
+            import urllib.request, urllib.parse, json as _json
+            max_results = min(max_results, 30)
+            params = urllib.parse.urlencode({"q": query, "sort": sort, "per_page": max_results})
+            endpoint = "issues" if type == "issues" else "repositories"
+            url = f"https://api.github.com/search/{endpoint}?{params}"
+            headers = {"Accept": "application/vnd.github+json", "User-Agent": "research-agent"}
+            token = os.getenv("GITHUB_TOKEN")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = _json.loads(resp.read())
+            items = data.get("items", [])
+            lines = [f"GitHub search: {query} (type={type}, sort={sort})\n"]
+            for i, item in enumerate(items, 1):
+                if endpoint == "repositories":
+                    lines.append(
+                        f"{i}. {item.get('full_name', '')} ★{item.get('stargazers_count', 0)}\n"
+                        f"   {item.get('description', '')}\n"
+                        f"   {item.get('html_url', '')}\n"
+                        f"   Lang: {item.get('language', 'N/A')}  "
+                        f"Open issues: {item.get('open_issues_count', 0)}\n"
+                    )
+                else:
+                    lines.append(
+                        f"{i}. [{item.get('state', '')}] {item.get('title', '')}\n"
+                        f"   {item.get('html_url', '')}\n"
+                        f"   Labels: {', '.join(l['name'] for l in item.get('labels', []))}\n"
+                    )
+            return "\n".join(lines) if items else "No results found."
+        except Exception as e:
+            return f"[github_search] Error: {e}"
