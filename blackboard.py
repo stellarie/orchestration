@@ -30,22 +30,20 @@ class BlackBoard:
             content = path.read_text(encoding="utf-8") + "\n" + content
         path.write_text(content, encoding="utf-8")
 
-    def init_task(self, task_id: str, description: str):
+    def init_task(self, task_id: str, description: str, agent_names: list | None = None):
         now = datetime.now(timezone.utc).isoformat()
+        names = agent_names if agent_names is not None else [
+            "architect", "designer", "planner", "scaffolder",
+            "tester", "reviewer", "test-generator",
+            "coder", "qa-tester", "code-reviewer",
+            "commit", "documentation",
+        ]
         self.write("task.md", f"# Task\n\n{description}\n\n_Task ID: {task_id} | Started: {now}_")
         self.write("status.json", json.dumps({
             "task_id":      task_id,
-            "current_step": "architect",
+            "current_step": names[0] if names else "",
             "started_at":   now,
-            "steps": {
-                name: {"status": "pending", "iterations": 0}
-                for name in [
-                    "architect", "designer", "planner", "scaffolder",
-                    "tester", "reviewer", "test-generator",
-                    "coder", "qa-tester", "code-reviewer",
-                    "commit", "documentation",
-                ]
-            },
+            "steps": {name: {"status": "pending", "iterations": 0} for name in names},
         }, indent=2))
         for f in self.sessions_dir.glob("*.json"):
             f.unlink()

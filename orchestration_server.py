@@ -319,6 +319,7 @@ def _run_pipeline_with_cleanup(entry: "PipelineEntry", start_step: int = 0):
         _run_pipeline_steps(
             entry.repo_path, entry.task_desc, start_step,
             entry.skip_agents, entry.pipeline_id, entry.agent_overrides,
+            pipeline_label="dev",
         )
         ctrl = _pipeline_control.get(entry.pipeline_id, "running")
         final = "stopped" if ctrl == "stopped" else "done"
@@ -390,7 +391,7 @@ def _start_next_queued(repo_path: str):
                     f"{handoff[:6000]}"
                 )
 
-    bb.init_task(next_entry.pipeline_id, next_entry.task_desc)
+    bb.init_task(next_entry.pipeline_id, next_entry.task_desc, _agents_in_steps(PIPELINE_STEPS))
     bb.write("run-id",        next_entry.pipeline_id)
     bb.write("pipeline-step", "0")
     _emit_pipeline_event("pipeline_status", next_entry.pipeline_id, next_entry.repo_path, "running")
@@ -447,6 +448,18 @@ RESEARCH_ANALYSIS_STEPS = RESEARCH_PIPELINE_STEPS + [
 ]
 
 
+def _agents_in_steps(steps: list) -> list[str]:
+    """Ordered, deduplicated flat list of all agent names across a steps list."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for step in steps:
+        for n in _step_agent_names(step):
+            if n not in seen:
+                seen.add(n)
+                names.append(n)
+    return names
+
+
 def _step_agent_names(step) -> list[str]:
     """Flat list of agent names involved in a step (including reconciler where relevant)."""
     if isinstance(step, str):
@@ -494,14 +507,15 @@ def _determine_angles(task_description: str) -> list[str]:
 
 
 def _run_pipeline_steps(
-    repo_path:       str,
+    repo_path:        str,
     task_description: str,
-    start_step:      int  = 0,
-    skip_agents:     set  | None = None,
-    pipeline_id:     str  = "",
-    agent_overrides: dict | None = None,
-    steps_override:  list | None = None,
-    output_dir:      str  = "",
+    start_step:       int  = 0,
+    skip_agents:      set  | None = None,
+    pipeline_id:      str  = "",
+    agent_overrides:  dict | None = None,
+    steps_override:   list | None = None,
+    output_dir:       str  = "",
+    pipeline_label:   str  = "dev",
 ):
     """Execute PIPELINE_STEPS (or steps_override) from start_step. Called in a background thread."""
     STEPS = steps_override if steps_override is not None else PIPELINE_STEPS
@@ -582,6 +596,17 @@ def _run_pipeline_steps(
 
     def _run_judge(agent_name: str, attempt: int) -> str:
         """Run the judge after agent_name completed. Returns 'pass', 'rework:{critique}', or 'escalate'."""
+        # Load the agent's own prompt so the judge knows exactly what it was supposed to do
+        prompt_path = Path(__file__).parent / "agents" / "prompts" / f"{agent_name}.md"
+        agent_role  = prompt_path.read_text(encoding="utf-8").strip() if prompt_path.exists() else "(no prompt file)"
+
+        all_agents   = _agents_in_steps(STEPS)
+        pipeline_ctx = (
+            f"Pipeline type: {pipeline_label}\n"
+            f"Agents in this pipeline (in order): {', '.join(all_agents)}\n"
+            f"Agent currently being evaluated: {agent_name} (attempt {attempt + 1})"
+        )
+
         outputs   = AGENT_OUTPUTS.get(agent_name, [])
         retry_req = bb.read(f"retry-request/{agent_name}.md") or ""
         if retry_req.startswith("["):
@@ -601,10 +626,13 @@ def _run_pipeline_steps(
                 "for any files this agent was expected to produce."
             )
         instr = (
-            f"Evaluate the output just produced by the '{agent_name}' agent (attempt {attempt+1}).\n\n"
-            f"Step 1: call read_blackboard(filename=\"task.md\") to understand the task.\n"
+            f"## Pipeline context\n{pipeline_ctx}\n\n"
+            f"## What the '{agent_name}' agent is supposed to do\n{agent_role}\n\n"
+            f"## Evaluation task\n"
+            f"Evaluate the output just produced by '{agent_name}'.\n\n"
+            f"Step 1: call read_blackboard(filename=\"task.md\") to understand the user's task.\n"
             f"Step 2: {file_section}\n"
-            + (f"Step 3: if retry-request/{agent_name}.md exists, call read_blackboard(filename=\"retry-request/{agent_name}.md\").\n\n" if retry_req else "\n")
+            + (f"Step 3: call read_blackboard(filename=\"retry-request/{agent_name}.md\") for previous feedback.\n\n" if retry_req else "\n")
             + (f"Previous rework feedback:\n{retry_req}\n\n" if retry_req else "")
             + "Return PASS, REWORK {agent}: {critique}, or ESCALATE: {reason}."
         )
@@ -871,7 +899,7 @@ def pipeline_run(req: PipelineRunRequest):
         _pipeline_registry[pipeline_id] = entry
 
     bb = BlackBoard(req.repo_path)
-    bb.init_task(pipeline_id, req.description)
+    bb.init_task(pipeline_id, req.description, _agents_in_steps(PIPELINE_STEPS))
     bb.write("run-id",        pipeline_id)
     bb.write("pipeline-step", "0")
 
@@ -951,8 +979,9 @@ def research_run(req: ResearchRunRequest):
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
 
+    _research_label = "research+dev" if req.queue_dev else "research"
     bb = BlackBoard(req.repo_path)
-    bb.init_task(pipeline_id, req.description)
+    bb.init_task(pipeline_id, req.description, _agents_in_steps(RESEARCH_ANALYSIS_STEPS))
     bb.write("run-id",        pipeline_id)
     bb.write("pipeline-step", "0")
     _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
@@ -983,7 +1012,8 @@ def research_run(req: ResearchRunRequest):
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
                                 steps_override=RESEARCH_ANALYSIS_STEPS,
-                                output_dir=output_dir)
+                                output_dir=output_dir,
+                                pipeline_label=_research_label)
             ctrl = _pipeline_control.get(pipeline_id, "running")
             final = "stopped" if ctrl == "stopped" else "done"
         except Exception:
@@ -1031,7 +1061,7 @@ def scout_run(req: ScoutRunRequest):
         _pipeline_registry[pipeline_id] = entry
 
     bb = BlackBoard(req.repo_path)
-    bb.init_task(pipeline_id, req.description)
+    bb.init_task(pipeline_id, req.description, _agents_in_steps(OSS_SCOUT_STEPS))
     bb.write("run-id",        pipeline_id)
     bb.write("pipeline-step", "0")
     _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
@@ -1057,7 +1087,7 @@ def scout_run(req: ScoutRunRequest):
         _pipeline_stop_events[pipeline_id] = stop_ev
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
-                                steps_override=OSS_SCOUT_STEPS)
+                                steps_override=OSS_SCOUT_STEPS, pipeline_label="scout")
             ctrl = _pipeline_control.get(pipeline_id, "running")
             final = "stopped" if ctrl == "stopped" else "done"
         except Exception:
@@ -1140,7 +1170,7 @@ def custom_run(req: CustomPipelineRequest):
         _pipeline_registry[pipeline_id] = entry
 
     bb = BlackBoard(req.repo_path)
-    bb.init_task(pipeline_id, req.description)
+    bb.init_task(pipeline_id, req.description, _agents_in_steps(pipeline_steps))
     bb.write("run-id",        pipeline_id)
     bb.write("pipeline-step", "0")
     _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
@@ -1166,7 +1196,8 @@ def custom_run(req: CustomPipelineRequest):
         _pipeline_stop_events[pipeline_id] = stop_ev
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id,
-                                agent_overrides, steps_override=pipeline_steps)
+                                agent_overrides, steps_override=pipeline_steps,
+                                pipeline_label="custom")
             ctrl = _pipeline_control.get(pipeline_id, "running")
             final = "stopped" if ctrl == "stopped" else "done"
         except Exception:

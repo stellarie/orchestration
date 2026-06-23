@@ -1180,9 +1180,22 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onCl
 function PipelineGraph({ pipelineId, agents, agentOrder, selectedAgent, skippedAgents, onSelect, onSkipToggle,
                           showPrePrompts, agentOverrides, onOverrideChange,
                           isRunning, onAgentControl }) {
-  const independents = agentOrder.filter(n => !PIPELINE_SET.has(n) && n !== 'consultant');
   const [steps,       setSteps]       = useState([]);
   const [collapsed,   setCollapsed]   = useState({});
+
+  // Derive which agents belong to the pipeline from the loaded step graph.
+  // Falls back to PIPELINE_SET only when steps haven't loaded yet.
+  const stepsSet = useMemo(() => {
+    if (!steps.length) return PIPELINE_SET;
+    const s = new Set(['reconciler']);
+    steps.forEach(step => {
+      if (step.type === 'single' || step.type === 'parallel') s.add(step.agent);
+      else if (step.type === 'fanout') step.entries.forEach(e => s.add(e.agent));
+    });
+    return s;
+  }, [steps]);
+
+  const independents = agentOrder.filter(n => !stepsSet.has(n) && n !== 'consultant');
 
   useEffect(() => {
     const url = pipelineId ? `${API}/pipeline/${pipelineId}/steps` : `${API}/pipeline/steps`;
@@ -1316,12 +1329,15 @@ function PipelineGraph({ pipelineId, agents, agentOrder, selectedAgent, skippedA
     return null;
   };
 
+  // When steps haven't loaded yet, show whatever agents have appeared via SSE.
+  // This renders the correct agents for any pipeline type (research, scout, dev, custom).
+  const fallbackAgents = agentOrder.filter(n => n !== 'consultant');
   const graphBody = steps.length > 0
     ? steps.map((step, i) => renderStep(step, i))
-    : PIPELINE_AGENTS.map((name, i) => html`
-        <div key=${i}>
+    : fallbackAgents.map((name, i) => html`
+        <div key=${name}>
           ${renderNode(name, true)}
-          ${i < PIPELINE_AGENTS.length - 1 && html`
+          ${i < fallbackAgents.length - 1 && html`
             <div class=${`pg-connector pg-connector--${agents[name]?.status ?? 'idle'}`}>
               <div class="pg-connector-line"></div><div class="pg-connector-arrow"></div>
             </div>`}
