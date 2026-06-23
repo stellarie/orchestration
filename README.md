@@ -1,81 +1,91 @@
 # Orchestration
 
-A 12-agent AI pipeline that takes a task description and produces working, tested, committed code. Each agent has a single responsibility; they communicate through a shared blackboard rather than calling each other directly.
+A multi-pipeline AI system built on specialized LLM agents. Three pipelines cover the full dev loop: **research** (deep web research + analysis), **scout** (OSS contribution discovery), and **dev** (12-agent software development). All pipelines can be chained — research feeds into dev, scout discovers a repo and dev contributes to it.
+
+---
+
+## Pipelines at a glance
+
+### Dev pipeline
+Takes a task description and produces working, tested, committed code.
+
+```
+architect → designer → planner → scaffolder → tester → reviewer
+  → test-generator → coder → qa-tester → code-reviewer → commit → documentation
+```
+
+### Research pipeline
+Deep web research on any topic, always followed by an analyst and action planner.
+
+```
+query-planner → searcher×3 → reader×3 → tech-auditor → research-synthesizer
+  → research-analyst → action-planner
+```
+
+Deliverables (`brief.md`, `versions.md`, `caveats.md`, `analysis.md`, `action-plan.md`) are written to `~/stella-research/<topic-slug>/` and pushed to the `stellarie/stella-research` GitHub repo after the run completes.
+
+### Scout pipeline
+Finds open-source projects worth contributing to, scopes the issue, and queues a dev pipeline against the cloned repo.
+
+```
+oss-scout → issue-auditor → contribution-planner → [queues dev pipeline]
+```
 
 ---
 
 ## How it works
 
-```
-architect → designer → planner → scaffolder → tester → reviewer
-         → test-generator → coder → qa-tester → code-reviewer → commit → documentation
-```
-
-A FastAPI server (`orchestration_server.py`) hosts the agents and exposes a REST API. Claude Code acts as the **master orchestrator** — it drives the pipeline by calling the server between steps, reviewing each agent's output, and deciding whether to advance, patch, or retry.
+A FastAPI server (`orchestration_server.py`) hosts the pipeline runner and all agents, exposing a REST + SSE API. A Preact frontend (`frontend/index.html`) lets you start and monitor all three pipelines in real time.
 
 ### The blackboard
 
-All inter-agent communication goes through a `.blackboard/` directory inside the target repo. Agents write their outputs there (`analysis.md`, `contracts.md`, `work-plan.md`, etc.) and read each other's outputs from there. No agent calls another agent directly.
+All inter-agent communication goes through a `.blackboard/` directory inside the target repo. Agents write outputs there and read each other's outputs from there — no agent calls another agent directly.
 
-### The pipeline steps
+### Research output
 
-| # | Agent | Writes | Reads |
-|---|---|---|---|
-| 1 | **Architect** | `analysis.md`, `requirements.md`, `conventions.md` | `task.md` + codebase |
-| 2 | **Designer** | `design-spec.md` | architect outputs |
-| 3 | **Planner** | `work-plan.md` (TICKET-NNN batches) | architect + designer outputs |
-| 4 | **Scaffolder** | Contract files, CI workflow, test env | `work-plan.md` Batch 1 |
-| 5 | **Tester** | `test-plan.md` | requirements + design |
-| 6 | **Reviewer** | `test-review.md` (VERDICT: PASS/FAIL) | test plan |
-| 7 | **Test-Generator** | Test source files | contracts + test plan |
-| 8 | **Coder** | Production source files (one batch at a time) | contracts + conventions |
-| 9 | **QA-Tester** | `qa-report.md` (VERDICT: PASS/FAIL) | full codebase |
-| 10 | **Code-Reviewer** | `code-review.md` (VERDICT: PASS/FAIL) | full codebase |
-| 11 | **Commit** | `commit.md` | work-plan (for ticket IDs) |
-| 12 | **Documentation** | `docs.md`, `pr-description.md` | full blackboard |
+Deliverable-producing research agents write to two places simultaneously:
 
-Each agent also writes a `checklist/<agent>.md` to the blackboard. The orchestrator reads it before advancing — any unchecked `- [ ]` item triggers a retry.
+1. `.blackboard/research/` — for downstream agents to read during the same run
+2. `~/stella-research/<topic-slug>/` — clean output that gets committed and pushed to `stellarie/stella-research` after the pipeline finishes
 
-### TDD enforcement
+The topic slug is derived automatically from the research description (e.g. *"React 19 migration guide"* → `react-19-migration-guide`). Each research run gets its own subfolder, so the repo accumulates a browsable history of all past research.
 
-After every coder batch:
-1. **Compile check** — if it fails, the coder fixes it before anything else runs.
-2. **Test check** — if any test fails, the coder fixes it before the next batch starts.
+### The judge
 
-The test-generator writes real assertions against interfaces that don't exist yet (intentional compile errors). The coder implements against those tests, not the other way around.
+After each pipeline step, a **Judge** agent reads the expected output files from the blackboard and issues one of three verdicts:
 
-### Models
+- `PASS` — advances to the next step
+- `REWORK agent: critique` — replays the step with targeted feedback (up to 5 attempts)
+- `ESCALATE: reason` — pauses the pipeline for human review (or auto-passes in full-auto mode)
 
-| Agent | Model | Reasoning |
-|---|---|---|
-| Architect | Claude Opus 4.8 | Extended thinking, 16 000 token budget |
-| Planner | Claude Sonnet 4.6 | Extended thinking, 10 000 token budget |
-| Designer, Reviewer, QA-Tester, Code-Reviewer, Orchestrator | DeepSeek v4 Pro | Thinking, max effort |
-| All others | DeepSeek v4 Pro | No extended thinking |
+### Global agent memory
 
-If `ANTHROPIC_API_KEY` is not set, architect and planner fall back to DeepSeek v4 Pro with `thinking=max`. When running inside a Claude Code session, the key is inherited automatically — no `.env` entry needed.
+Every agent has a global memory file in `orchestration/agent-memory/<name>.md`. After completing work, agents call `write_memory` to record learnings — patterns, pitfalls, domain rules, judge critique patterns — that persist across all projects and future runs. Memory is injected into the agent's system prompt on every invocation and auto-compacted (via DeepSeek) when it exceeds 200 000 characters.
+
+### Pipeline chaining
+
+Research and scout pipelines can auto-queue a dev pipeline on completion. The research pipeline writes a `handoff.md` summary regardless of whether it succeeded fully — the dev pipeline always gets whatever context was produced.
 
 ---
 
 ## Getting started
 
-### 1. Prerequisites
+### Prerequisites
 
 - Python 3.11+
-- A `DEEPSEEK_API_KEY` (required)
-- An `ANTHROPIC_API_KEY` (optional — enables Claude Opus/Sonnet for architect/planner)
-- Claude Code (for the `/orchestrate` skill)
+- `DEEPSEEK_API_KEY` — required (coding agents, memory compaction)
+- `ANTHROPIC_API_KEY` — optional; enables Claude Opus/Sonnet for architect, planner, judge, and all research agents. Falls back to DeepSeek v4 Pro if unset (or auto-inherited when running inside Claude Code)
+- `TAVILY_API_KEY` — optional; enables higher-quality web search for research/scout agents. Falls back to DuckDuckGo (via `ddgs`, no key needed) if unset
+- `GITHUB_TOKEN` — optional; required to push research deliverables to `stellarie/stella-research`. Needs `contents: write` on that repo. Token is also used to clone the repo on first run if `~/stella-research` doesn't exist yet.
 
-### 2. Install dependencies
+### Install
 
 ```bash
 cd orchestration
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment
-
-Copy `.env.example` to `.env` and fill in your keys:
+### Configure
 
 ```bash
 cp .env.example .env
@@ -83,97 +93,50 @@ cp .env.example .env
 
 ```env
 DEEPSEEK_API_KEY=your-key-here
-ANTHROPIC_API_KEY=your-key-here   # optional
+ANTHROPIC_API_KEY=your-key-here   # optional but recommended
+TAVILY_API_KEY=your-key-here      # optional
+GITHUB_TOKEN=your-token-here      # optional — push research to stellarie/stella-research
 ```
 
-### 4. Start the server
+### Start
 
 ```bat
 start.bat
 ```
 
-Or directly:
+The server listens on `http://127.0.0.1:8765`. Open `frontend/index.html` in a browser to access the UI.
 
-```bash
-python orchestration_server.py
-```
+### Run
 
-The server listens on `http://127.0.0.1:8765`.
+From the UI, click **New Pipeline** to start a dev run, **Research + Dev** for a research-first run, or **OSS Scout** to find a contribution target.
 
-### 5. Run the pipeline
-
-From Claude Code, use the `/orchestrate` skill. It will ask for a repo path and task description, then drive the full 12-step pipeline.
+From Claude Code, use the `/orchestrate` skill for the dev pipeline.
 
 ---
 
 ## Logs
 
-Each pipeline run produces two files in `orchestration/logs/`:
+Each run produces two files in `orchestration/logs/`:
 
-- `orchestration.log` — the rotating server log (all agent API calls, validation results, errors)
-- `<run-id>.log` — the thinking + tool-call log for that run, e.g.:
-
-```
---- 2026-06-21 10:23:45 [architect]
-I need to understand the project structure first. The task mentions a Spring Boot
-application, so I'll start by listing files to find the build system...
----
-2026-06-21 10:23:52 [architect] → list_files
-2026-06-21 10:23:53 [architect] → read_file
---- 2026-06-21 10:23:55 [architect]
-Found build.gradle — Gradle + Java 17. Base package from existing code is
-com.example.checkin. Setting Namespace Declarations accordingly...
----
-```
-
-The `logs/` directory is gitignored.
+- `orchestration.log` — rotating server log (agent calls, judge verdicts, errors)
+- `<run-id>.log` — per-run thinking + tool-call log
 
 ---
 
-## What to adjust before using
+## Configuration
 
-### Hardcoded paths in skills
+All tuning lives in `config.py`:
 
-The Claude Code skills (`.claude/skills/`) reference the server location directly. Update these two files to match where you cloned the repo:
-
-**`.claude/skills/orchestrate/SKILL.md`** — one line:
-```
-tell the user to run `start.bat` in `C:\Users\Stella\orchestration\` first.
-```
-
-**`.claude/skills/run-orchestration/SKILL.md`** — two lines:
-```
-cd C:\Users\Stella\orchestration
-```
-
-Replace `C:\Users\Stella\orchestration` with your actual path. On macOS/Linux use forward slashes and drop the drive letter.
-
-### Model selection
-
-Edit `MODELS` in `config.py` to change which model each agent uses. Each entry has:
-
-```python
-"architect": {
-    "model":        "claude-opus-4-8",   # model ID
-    "provider":     "anthropic",          # "anthropic" | "deepseek"
-    "thinking":     True,                 # enable extended reasoning
-    "budget_tokens": 16000,               # anthropic only: thinking token budget
-}
-```
-
-For DeepSeek agents, `"reasoning_effort": "max"` controls thinking depth (`"high"` | `"max"`).
-
-### Agent tool limits
-
-`AGENT_TOOL_ITERATIONS` in `config.py` controls how many tool calls each agent can make before the loop terminates. The coder is set highest (200) since it iterates through many files per batch. Lower these if you want faster (but shallower) runs.
-
-### Access control
-
-`AGENT_CAPABILITIES` in `config.py` declares exactly which tools each agent can use and which file paths it can write to. For example, the coder is blocked from writing test files and the test-generator is blocked from writing production source. Adjust these if your project layout differs from the defaults (e.g. different test directory names).
+| Key | Purpose |
+|-----|---------|
+| `MODELS` | Model + provider + thinking config per agent |
+| `AGENT_TOOL_ITERATIONS` | Max tool calls per agent run (coder=200, judge=15, …) |
+| `AGENT_CAPABILITIES` | Exact tool set + write-deny path patterns per agent |
+| `AGENT_OUTPUTS` | Expected blackboard output files per agent — used by the judge |
 
 ### Agent prompts
 
-All agent system prompts live in `agents/prompts/`. They are plain Markdown files — edit them directly to adjust agent behaviour, add project-specific conventions, or change output formats. The validator checks in `validators.py` mirror the format requirements in the prompts; if you change an output format, update both.
+All system prompts live in `agents/prompts/` as plain Markdown files. Edit them directly to adjust behaviour, add project conventions, or change output formats.
 
 ---
 
@@ -182,19 +145,31 @@ All agent system prompts live in `agents/prompts/`. They are plain Markdown file
 ```
 orchestration/
 ├── agents/
-│   ├── prompts/          # System prompt for each agent (Markdown)
-│   ├── base.py           # BaseAgent: agentic loop, dual-provider API, logging
-│   ├── orchestrator.py   # Delegated orchestrator agent
-│   └── *.py              # One file per agent
-├── .claude/
-│   └── skills/
-│       ├── orchestrate/  # /orchestrate skill for Claude Code
-│       └── run-orchestration/
-├── config.py             # Models, capabilities, concurrency, iterations
-├── tools.py              # Tool schemas, ToolExecutor, path enforcement
-├── validators.py         # Blackboard output validation per agent
-├── blackboard.py         # Shared state store
-├── orchestration_server.py
+│   ├── prompts/              # System prompt for each agent (Markdown)
+│   ├── base.py               # BaseAgent: agentic loop, stop signal, memory, dual-provider API
+│   └── *.py                  # One file per agent
+├── agent-memory/             # Global per-agent memory files (cross-project, auto-compacted)
+├── docs/
+│   └── pipeline.md           # Deep-dive architecture reference
+├── frontend/
+│   └── index.html            # Preact UI — pipeline management, live step graph, SSE stream
+├── .claude/skills/
+│   ├── orchestrate/          # /orchestrate skill for Claude Code
+│   └── run-orchestration/    # Server start/health check
+├── config.py                 # Models, capabilities, iterations, outputs
+├── tools.py                  # Tool schemas + ToolExecutor (blackboard, output, memory, search, …)
+├── blackboard.py             # Shared state store (.blackboard/)
+├── memory.py                 # MemoryManager: global cross-project agent memory + auto-compaction
+├── session.py                # SessionManager: message history for resume_session
+├── orchestration_server.py   # FastAPI server — all pipeline endpoints + SSE bus
 ├── requirements.txt
 └── start.bat
+
+~/stella-research/            # Git repo (cloned from stellarie/stella-research on first run)
+└── <topic-slug>/             # One folder per research run, auto-named from the description
+    ├── brief.md
+    ├── versions.md
+    ├── caveats.md
+    ├── analysis.md
+    └── action-plan.md
 ```

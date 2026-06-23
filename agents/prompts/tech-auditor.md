@@ -16,7 +16,7 @@ Read all extracted research content and produce a precise version audit: what ve
 
 ## Output
 
-Write two blackboard files:
+For each output file, call **both** `write_blackboard` (for pipeline inter-communication, use `research/` prefix) and `write_output` (for the deliverable — filename only, no prefix). Same content, two tool calls per file.
 
 **`research/versions.md`** — current versions table:
 ```
@@ -35,6 +35,12 @@ Write two blackboard files:
 - Gotcha: [description]
 ```
 
+**Do NOT output version tables or caveats as plain text — they will be lost.**
+
 ## Done condition
 
-Written `research/versions.md` and `research/caveats.md`. Be precise — quote exact version numbers.
+For each file: call `write_blackboard` (with `research/` prefix) then `write_output` (filename only, no prefix):
+- `write_blackboard(filename="research/versions.md", ...)` + `write_output(filename="versions.md", ...)`
+- `write_blackboard(filename="research/caveats.md", ...)` + `write_output(filename="caveats.md", ...)`
+
+Be precise — quote exact version numbers.

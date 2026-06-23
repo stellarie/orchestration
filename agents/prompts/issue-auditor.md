@@ -45,6 +45,12 @@ Labels: [labels]
 
 Also write `scout/runner-up.md` with the second-best option in case the primary is claimed.
 
+For each output file, call **both** tools — same content, two calls each:
+1. `write_blackboard(filename="scout/target-issue.md", content=...)` + `write_output(filename="oss/target-issue.md", content=...)`
+2. `write_blackboard(filename="scout/runner-up.md", content=...)` + `write_output(filename="oss/runner-up.md", content=...)`
+
+**Do NOT output findings as plain text — they will be lost.**
+
 ## Done condition
 
-Written `scout/target-issue.md` and `scout/runner-up.md`.
+`write_blackboard` and `write_output` called for both `target-issue.md` and `runner-up.md`.

@@ -61,6 +61,12 @@ Write `research/action-plan.md`:
 - [open question]: [why it remains open and how to resolve it]
 ```
 
+Call **both** tools — same content, two calls:
+1. `write_blackboard(filename="research/action-plan.md", content=...)` — keep the `research/` prefix
+2. `write_output(filename="action-plan.md", content=...)` — filename only, no prefix
+
+**Do NOT output the action plan as plain text — it will be lost.**
+
 ## Done condition
 
-Written `research/action-plan.md`.
+`write_blackboard` called with `filename="research/action-plan.md"` and `write_output` called with `filename="action-plan.md"`.

@@ -44,7 +44,7 @@ _WEB_SEARCH_SCHEMA = {
     "type": "function",
     "function": {
         "name": "web_search",
-        "description": "Search the web using Tavily. Returns titles, URLs, and snippet content for the top results.",
+        "description": "Search the web. Tries Tavily → DuckDuckGo → Bing automatically. Returns titles, URLs, and snippets.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -52,6 +52,26 @@ _WEB_SEARCH_SCHEMA = {
                 "max_results": {"type": "integer", "description": "Max results to return (default 8, max 20)"},
             },
             "required": ["query"],
+        },
+    },
+}
+
+_CRAWL_LINKS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "crawl_links",
+        "description": (
+            "Fetch a URL and return all hyperlinks found on that page (href + anchor text, resolved to absolute URLs). "
+            "Use this to discover related pages, API docs, or sub-sections from an index page, then fetch the ones that look relevant."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url":       {"type": "string",  "description": "URL to crawl"},
+                "max_links": {"type": "integer", "description": "Max links to return (default 40)"},
+                "timeout":   {"type": "integer", "description": "Request timeout in seconds (default 20)"},
+            },
+            "required": ["url"],
         },
     },
 }
@@ -213,13 +233,67 @@ CONTRACT_TOOLS = (
 )
 
 # Lookup map from tool name → schema dict; used by build_tool_schemas().
+_WRITE_OUTPUT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "write_output",
+        "description": (
+            "Write a deliverable file to the project output directory (NOT the blackboard). "
+            "Use for final, human-readable outputs: research briefs, analysis reports, action plans, scout findings. "
+            "The file is written to {repo_path}/{filename} and a metadata header is auto-injected. "
+            "Call this IN ADDITION TO write_blackboard — both are required for deliverable files."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Relative output path, e.g. 'research/brief.md' or 'oss/overview.md'",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "File content (metadata header is added automatically — do not include it)",
+                },
+            },
+            "required": ["filename", "content"],
+        },
+    },
+}
+
+_WRITE_MEMORY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "write_memory",
+        "description": (
+            "Record a learning or insight to your global memory. "
+            "Persists across ALL projects and pipeline runs. "
+            "Write things that make you more effective in future runs: "
+            "successful patterns, pitfalls, domain rules, version-specific facts, judge critique patterns. "
+            "Be specific and concrete — skip vague observations."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "What you learned. Concrete and specific.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+}
+
 _ALL_TOOL_SCHEMAS: dict[str, dict] = {
     t["function"]["name"]: t for t in TOOL_SCHEMAS
 }
 _ALL_TOOL_SCHEMAS["read_contract_file"] = _READ_CONTRACT_FILE_SCHEMA
 _ALL_TOOL_SCHEMAS["web_search"]         = _WEB_SEARCH_SCHEMA
+_ALL_TOOL_SCHEMAS["crawl_links"]        = _CRAWL_LINKS_SCHEMA
 _ALL_TOOL_SCHEMAS["fetch_url"]          = _FETCH_URL_SCHEMA
 _ALL_TOOL_SCHEMAS["github_search"]      = _GITHUB_SEARCH_SCHEMA
+_ALL_TOOL_SCHEMAS["write_output"]       = _WRITE_OUTPUT_SCHEMA
+_ALL_TOOL_SCHEMAS["write_memory"]       = _WRITE_MEMORY_SCHEMA
 
 
 def build_tool_schemas(tool_names: set[str]) -> list[dict]:
@@ -232,10 +306,15 @@ def build_tool_schemas(tool_names: set[str]) -> list[dict]:
 
 
 class ToolExecutor:
-    def __init__(self, repo_path: str, blackboard, write_deny: list[str] | None = None):
-        self.repo        = Path(repo_path)
-        self.bb          = blackboard
-        self._write_deny = write_deny or []
+    def __init__(self, repo_path: str, blackboard, write_deny: list[str] | None = None,
+                 agent_name: str = "", pipeline_id: str = "", memory=None, output_dir: str = ""):
+        self.repo          = Path(repo_path)
+        self.bb            = blackboard
+        self._write_deny   = write_deny or []
+        self._agent_name   = agent_name
+        self._pipeline_id  = pipeline_id
+        self._memory       = memory
+        self._output_dir   = output_dir
 
     def execute(self, name: str, args: dict) -> str:
         try:
@@ -252,10 +331,16 @@ class ToolExecutor:
             elif name == "write_blackboard":
                 self.bb.write(args["filename"], args["content"], append=args.get("append", False))
                 return f"Written to blackboard: {args['filename']}"
+            elif name == "write_output":
+                return self._write_output(args["filename"], args["content"])
+            elif name == "write_memory":
+                return self._write_memory(args["content"])
             elif name == "run_command":
                 return self._run_command(args["command"], args.get("timeout", 60))
             elif name == "web_search":
                 return self._web_search(args["query"], args.get("max_results", 8))
+            elif name == "crawl_links":
+                return self._crawl_links(args["url"], args.get("max_links", 40), args.get("timeout", 20))
             elif name == "fetch_url":
                 return self._fetch_url(args["url"], args.get("timeout", 20))
             elif name == "github_search":
@@ -265,6 +350,26 @@ class ToolExecutor:
                 return f"Unknown tool: {name}"
         except Exception as e:
             return f"Tool error ({name}): {e}"
+
+    def _write_output(self, filename: str, content: str) -> str:
+        from datetime import datetime, timezone
+        base = Path(self._output_dir) if self._output_dir else self.repo
+        path = base / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        header = (
+            f"---\nagent: {self._agent_name}\n"
+            f"pipeline: {self._pipeline_id}\n"
+            f"generated: {ts}\n---\n\n"
+        )
+        path.write_text(header + content, encoding="utf-8")
+        return f"Written output: {filename}"
+
+    def _write_memory(self, content: str) -> str:
+        if self._memory is None:
+            return "[write_memory] Memory manager not available."
+        self._memory.append(self._agent_name, content)
+        return "Memory updated."
 
     def _read_file(self, path: str) -> str:
         full = self.repo / path
@@ -328,27 +433,110 @@ class ToolExecutor:
         return "\n".join(parts)
 
     def _web_search(self, query: str, max_results: int = 8) -> str:
+        errors: list[str] = []
+
+        # 1. Tavily
         api_key = os.getenv("TAVILY_API_KEY")
-        if not api_key:
-            return "[web_search] TAVILY_API_KEY not set. Add it to .env to enable web search."
+        if api_key:
+            try:
+                r = self._web_search_tavily(query, max_results, api_key)
+                if r:
+                    return r
+            except Exception as e:
+                errors.append(f"tavily: {e}")
+
+        # 2. DuckDuckGo
         try:
-            import urllib.request, json as _json
-            max_results = min(max_results, 20)
-            payload = _json.dumps({"api_key": api_key, "query": query, "max_results": max_results}).encode()
-            req = urllib.request.Request(
-                "https://api.tavily.com/search",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = _json.loads(resp.read())
-            results = data.get("results", [])
-            lines = [f"Query: {query}\n"]
-            for i, r in enumerate(results, 1):
-                lines.append(f"{i}. {r.get('title', '')}\n   URL: {r.get('url', '')}\n   {r.get('content', '')[:400]}\n")
-            return "\n".join(lines) if results else "No results found."
+            from ddgs import DDGS
+            results = list(DDGS().text(query, max_results=min(max_results, 20)))
+            if results:
+                lines = [f"Query: {query} (via DuckDuckGo)\n"]
+                for i, r in enumerate(results, 1):
+                    lines.append(
+                        f"{i}. {r.get('title', '')}\n"
+                        f"   URL: {r.get('href', '')}\n"
+                        f"   {r.get('body', '')[:400]}\n"
+                    )
+                return "\n".join(lines)
+        except ImportError:
+            pass
         except Exception as e:
-            return f"[web_search] Error: {e}"
+            errors.append(f"duckduckgo: {e}")
+
+        # 3. Bing (scraping fallback)
+        try:
+            r = self._web_search_bing(query, max_results)
+            if r:
+                return r
+        except Exception as e:
+            errors.append(f"bing: {e}")
+
+        err = "; ".join(errors) if errors else "no backend available"
+        return (
+            f"[web_search] All backends failed ({err}). "
+            "Install ddgs for free search: pip install ddgs"
+        )
+
+    def _web_search_tavily(self, query: str, max_results: int, api_key: str) -> str:
+        import urllib.request, json as _json
+        max_results = min(max_results, 20)
+        payload = _json.dumps({"api_key": api_key, "query": query, "max_results": max_results}).encode()
+        req = urllib.request.Request(
+            "https://api.tavily.com/search",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read())
+        results = data.get("results", [])
+        if not results:
+            return ""
+        lines = [f"Query: {query} (via Tavily)\n"]
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. {r.get('title', '')}\n   URL: {r.get('url', '')}\n   {r.get('content', '')[:400]}\n")
+        return "\n".join(lines)
+
+    def _web_search_bing(self, query: str, max_results: int = 8) -> str:
+        import urllib.request, urllib.parse, json as _json
+        params = urllib.parse.urlencode({"q": query, "count": min(max_results * 2, 20)})
+        url = f"https://www.bing.com/search?{params}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) "
+                "Gecko/20100101 Firefox/124.0"
+            ),
+            "Accept":          "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "DNT":             "1",
+        })
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        # Each organic result lives in <li class="b_algo">
+        algo_blocks = re.findall(
+            r'<li[^>]+class="[^"]*\bb_algo\b[^"]*"[^>]*>(.*?)</li>',
+            html, re.DOTALL,
+        )
+        results = []
+        for block in algo_blocks[:max_results]:
+            m = re.search(
+                r'<h2[^>]*>.*?<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>',
+                block, re.DOTALL,
+            )
+            if not m:
+                continue
+            link  = m.group(1)
+            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+            sp    = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
+            snip  = re.sub(r"<[^>]+>", " ", sp.group(1)).strip()[:400] if sp else ""
+            results.append((title, link, snip))
+
+        if not results:
+            return ""
+        lines = [f"Query: {query} (via Bing)\n"]
+        for i, (title, link, snip) in enumerate(results, 1):
+            lines.append(f"{i}. {title}\n   URL: {link}\n   {snip}\n")
+        return "\n".join(lines)
 
     def _fetch_url(self, url: str, timeout: int = 20) -> str:
         try:
@@ -367,6 +555,57 @@ class ToolExecutor:
             return text[:20000]
         except Exception as e:
             return f"[fetch_url] Error fetching {url}: {e}"
+
+    def _crawl_links(self, url: str, max_links: int = 40, timeout: int = 20) -> str:
+        try:
+            import urllib.request
+            from urllib.parse import urljoin, urlparse, urldefrag
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (research-agent)"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw       = resp.read()
+                ct        = resp.headers.get("Content-Type", "")
+                final_url = resp.url
+            if "html" not in ct.lower():
+                return f"[crawl_links] Not an HTML page (Content-Type: {ct})"
+            html = raw.decode("utf-8", errors="replace")
+
+            # Page title
+            tm = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
+            page_title = re.sub(r"<[^>]+>", "", tm.group(1)).strip() if tm else final_url
+
+            # Extract all <a href="...">anchor</a>
+            link_pat = re.compile(
+                r'<a[^>]+href=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>',
+                re.DOTALL | re.IGNORECASE,
+            )
+            seen: set[str] = set()
+            links: list[tuple[str, str]] = []
+            for m in link_pat.finditer(html):
+                raw_href = m.group(1).strip()
+                anchor   = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not anchor:
+                    continue
+                abs_href, _ = urldefrag(urljoin(final_url, raw_href))
+                p = urlparse(abs_href)
+                if p.scheme not in ("http", "https") or not p.netloc:
+                    continue
+                if abs_href in seen:
+                    continue
+                seen.add(abs_href)
+                links.append((abs_href, anchor[:100]))
+                if len(links) >= max_links:
+                    break
+
+            lines = [
+                f"Page: {page_title}",
+                f"URL:  {final_url}",
+                f"Links found: {len(links)}\n",
+            ]
+            for i, (href, anchor) in enumerate(links, 1):
+                lines.append(f"{i:3}. {anchor}\n     {href}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"[crawl_links] Error: {e}"
 
     def _github_search(self, query: str, type: str = "repositories",
                        sort: str = "stars", max_results: int = 10) -> str:

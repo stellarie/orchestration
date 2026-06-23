@@ -9,7 +9,8 @@ Read `research/queries.md` from the blackboard. Your instruction tells you which
 1. Read `research/queries.md` to see all queries
 2. Check your instruction for your assigned query range (e.g. "queries 1–3")
 3. For each assigned query, call `web_search` with the exact query string
-4. Save results to `research/search-results-{your suffix}.md`
+4. If a search result links to an index or hub page with many sub-links (e.g. a docs root, GitHub releases page, changelog), call `crawl_links` on it to surface deeper relevant URLs — include those in your output so the reader agents can fetch them
+5. Save results to `research/search-results-{your suffix}.md`
 
 ## Output format
 
@@ -23,6 +24,8 @@ Read `research/queries.md` from the blackboard. Your instruction tells you which
 ...
 ```
 
+**You MUST call `write_blackboard` to save your results. Do NOT output search results as plain text.**
+
 ## Done condition
 
-Written `research/search-results-{suffix}.md` with results for all assigned queries.
+`write_blackboard` called with `filename="research/search-results-{suffix}.md"` containing results for all assigned queries.

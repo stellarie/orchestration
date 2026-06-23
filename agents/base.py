@@ -90,14 +90,21 @@ class BaseAgent:
     READ_ONLY     = False
     CONTRACT_ONLY = False  # test-generator: read_file replaced by read_contract_file
 
-    def __init__(self, repo_path: str, force_deepseek: bool = False, pipeline_id: str = ""):
+    def __init__(self, repo_path: str, force_deepseek: bool = False, pipeline_id: str = "", output_dir: str = ""):
         self.repo_path   = repo_path
         self.pipeline_id = pipeline_id
         self.bb          = BlackBoard(repo_path)
         self.session    = SessionManager(repo_path)
-        self.memory     = MemoryManager(repo_path)
+        self.memory     = MemoryManager()
         caps            = AGENT_CAPABILITIES.get(self.NAME, {})
-        self.executor   = ToolExecutor(repo_path, self.bb, write_deny=caps.get("write_deny", []))
+        self.executor   = ToolExecutor(
+            repo_path, self.bb,
+            write_deny=caps.get("write_deny", []),
+            agent_name=self.NAME,
+            pipeline_id=pipeline_id,
+            memory=self.memory,
+            output_dir=output_dir,
+        )
         self.cfg        = dict(MODELS[self.NAME])
         if force_deepseek and self.cfg.get("provider") == "anthropic":
             self.cfg["provider"] = "deepseek"
@@ -195,7 +202,16 @@ class BaseAgent:
                 f"— a sequential step before or after this batch handles shared infrastructure."
             )
         if episodic:
-            parts.append(f"\n## Your memory of this repo\n{episodic}")
+            parts.append(f"\n## Your global learnings (across all projects)\n{episodic}")
+        caps = AGENT_CAPABILITIES.get(self.NAME, {})
+        if "write_memory" in caps.get("tools", set()):
+            parts.append(
+                "\n## Updating your memory\n"
+                "After completing your work, call `write_memory` with any non-obvious learnings: "
+                "patterns that worked, pitfalls encountered, domain rules, judge critique patterns, "
+                "or version-specific facts worth remembering across projects. "
+                "Be specific and concrete. Skip if nothing new was learned."
+            )
         grimoire = _load_grimoire(self.NAME, instruction)
         if grimoire:
             parts.append(f"\n{grimoire}")

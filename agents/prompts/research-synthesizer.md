@@ -40,6 +40,12 @@ Write `research/brief.md`:
 [List of the most authoritative URLs consulted]
 ```
 
+Call **both** tools — same content, two calls:
+1. `write_blackboard(filename="research/brief.md", content=...)` — for pipeline inter-communication (keep the `research/` prefix)
+2. `write_output(filename="brief.md", content=...)` — for the deliverable (filename only, no prefix)
+
+**Do NOT output the brief as plain text — it will be lost.**
+
 ## Done condition
 
-Written `research/brief.md` as a complete, actionable document. The development agents should be able to read only this file and have everything they need to avoid outdated-knowledge mistakes.
+`write_blackboard` called with `filename="research/brief.md"` and `write_output` called with `filename="brief.md"`. The development agents should be able to read only this file and have everything they need to avoid outdated-knowledge mistakes.

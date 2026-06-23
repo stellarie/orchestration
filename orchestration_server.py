@@ -157,19 +157,11 @@ class AgentControlRequest(BaseModel):
     action: str  # "skip" | "restart" | "pause"
 
 
-class GithubOutput(BaseModel):
-    repo:   str          # "owner/repo"
-    folder: str          # path inside the repo, e.g. "research/my-topic"
-    branch: str = "main"
-
-
 class ResearchRunRequest(BaseModel):
-    repo_path:        str
-    description:      str
-    queue_dev:        bool = False   # auto-queue dev pipeline after research finishes
-    dev_description:  str  = ""      # task for the queued dev pipeline (defaults to description)
-    github_output:    GithubOutput | None = None   # push research files to a GitHub repo
-    with_analysis:    bool = False   # add research-analyst + action-planner after synthesiser
+    repo_path:       str  = ""   # optional when not queuing dev; defaults to ~/stella-research/.workspace
+    description:     str
+    queue_dev:       bool = False
+    dev_description: str  = ""
 
 
 class ScoutRunRequest(BaseModel):
@@ -177,6 +169,22 @@ class ScoutRunRequest(BaseModel):
     description:      str            # topic / interests for the scout
     queue_dev:        bool = False   # auto-queue dev pipeline once contribution-planner finishes
     dev_description:  str  = ""      # override task desc for queued dev pipeline
+
+
+class CustomAgentEntry(BaseModel):
+    name:      str
+    preprompt: str = ""
+
+class CustomStep(BaseModel):
+    agents: list[CustomAgentEntry]
+
+class CustomPipelineRequest(BaseModel):
+    repo_path:       str
+    description:     str
+    steps:           list[CustomStep]
+    queue_dev:       bool       = False
+    dev_description: str        = ""
+    handoff_files:   list[str]  = []   # blackboard files explicitly passed as context to the queued pipeline
 
 
 # ── Pipeline registry ────────────────────────────────────────────────────────
@@ -190,7 +198,8 @@ class PipelineEntry:
     skip_agents:        set  = dc_field(default_factory=set)
     agent_overrides:    dict = dc_field(default_factory=dict)
     source_pipeline_id: str  = ""    # inject handoff.md from this pipeline when starting
-    steps_key:          str  = "dev" # "dev" | "research" | "research_analysis" | "scout"
+    steps_key:          str  = "dev" # "dev" | "research" | "research_analysis" | "scout" | "custom"
+    custom_steps:       list = dc_field(default_factory=list)  # serialised steps for custom pipelines
     created_at:         str  = dc_field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -213,86 +222,69 @@ def _emit_pipeline_event(event_type: str, pipeline_id: str, repo_path: str, data
     })
 
 
-def _push_research_to_github(bb: "BlackBoard", github_output: "GithubOutput", topic: str) -> list[str]:
-    """Push research/* blackboard files to a GitHub repo via the Contents API.
+import re as _re
 
-    Returns a list of paths successfully pushed.
-    """
-    import base64
-    import urllib.request
-    import urllib.error
+STELLA_RESEARCH_DIR = Path.home() / "stella-research"
 
+
+def _slugify(text: str) -> str:
+    slug = _re.sub(r"[^a-z0-9]+", "-", text.lower().strip())[:50].strip("-")
+    return slug or "research"
+
+
+def _ensure_research_repo() -> None:
+    """Ensure ~/stella-research exists and is a git repo. Clones from GitHub if GITHUB_TOKEN is set."""
+    import subprocess
+    STELLA_RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
+    if (STELLA_RESEARCH_DIR / ".git").exists():
+        return
     token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        logger.warning("[research→github] GITHUB_TOKEN not set — skipping push")
-        return []
+    if token:
+        url = f"https://{token}@github.com/stellarie/stella-research.git"
+        r = subprocess.run(["git", "clone", url, "."], cwd=str(STELLA_RESEARCH_DIR),
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            logger.info("[research→git] cloned stellarie/stella-research to %s", STELLA_RESEARCH_DIR)
+            return
+        logger.warning("[research→git] clone failed: %s — initialising empty repo", r.stderr.strip())
+    subprocess.run(["git", "init"], cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10)
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
+                   cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10)
+    if token:
+        subprocess.run(
+            ["git", "remote", "add", "origin", f"https://{token}@github.com/stellarie/stella-research.git"],
+            cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10,
+        )
 
-    repo   = github_output.repo
-    folder = github_output.folder.strip("/")
-    branch = github_output.branch
 
-    research_files = [
-        "research/queries.md",
-        "research/search-results-1.md",
-        "research/search-results-2.md",
-        "research/search-results-3.md",
-        "research/extracted-1.md",
-        "research/extracted-2.md",
-        "research/extracted-3.md",
-        "research/versions.md",
-        "research/caveats.md",
-        "research/brief.md",
-        "research/analysis.md",
-        "research/action-plan.md",
-    ]
-
-    pushed = []
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept":        "application/vnd.github+json",
-        "Content-Type":  "application/json",
-        "User-Agent":    "orchestration-server",
-    }
-
-    for bb_path in research_files:
-        content = bb.read(bb_path)
-        if not content or content.startswith("["):
-            continue
-
-        filename  = bb_path.split("/")[-1]
-        api_path  = f"{folder}/{filename}"
-        api_url   = f"https://api.github.com/repos/{repo}/contents/{api_path}"
-        encoded   = base64.b64encode(content.encode("utf-8")).decode("ascii")
-
-        # Check if the file already exists (need its SHA to update)
-        sha = None
-        try:
-            req = urllib.request.Request(api_url, headers=headers)
-            with urllib.request.urlopen(req) as resp:
-                existing = json.loads(resp.read())
-                sha = existing.get("sha")
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                logger.warning("[research→github] GET %s failed: %s", api_path, e)
-
-        payload: dict = {
-            "message": f"research: {topic[:60]} — {filename}",
-            "content": encoded,
-            "branch":  branch,
-        }
-        if sha:
-            payload["sha"] = sha
-
-        try:
-            data = json.dumps(payload).encode("utf-8")
-            req  = urllib.request.Request(api_url, data=data, headers=headers, method="PUT")
-            with urllib.request.urlopen(req):
-                pushed.append(api_path)
-                logger.info("[research→github] pushed %s", api_path)
-        except urllib.error.HTTPError as e:
-            logger.warning("[research→github] PUT %s failed: %s", api_path, e)
-
-    return pushed
+def _push_stella_research(folder_name: str, topic: str) -> bool:
+    """Stage new research folder, commit, and push ~/stella-research to origin."""
+    import subprocess
+    token = os.getenv("GITHUB_TOKEN")
+    repo  = str(STELLA_RESEARCH_DIR)
+    try:
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, timeout=30)
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"],
+                              cwd=repo, capture_output=True, timeout=10)
+        if diff.returncode == 0:
+            logger.info("[research→git] nothing to commit for %s", folder_name)
+            return False
+        subprocess.run(["git", "commit", "-m", f"research: {topic[:80]}"],
+                       cwd=repo, check=True, timeout=30)
+        if token:
+            remote = f"https://{token}@github.com/stellarie/stella-research.git"
+            push = subprocess.run(["git", "push", remote, "HEAD:main"],
+                                  cwd=repo, capture_output=True, text=True, timeout=60)
+        else:
+            push = subprocess.run(["git", "push"], cwd=repo, capture_output=True, text=True, timeout=60)
+        if push.returncode != 0:
+            logger.warning("[research→git] push failed: %s", push.stderr.strip())
+            return False
+        logger.info("[research→git] pushed %s to stellarie/stella-research", folder_name)
+        return True
+    except Exception:
+        logger.warning("[research→git] commit/push failed", exc_info=True)
+        return False
 
 
 def _write_handoff(entry: "PipelineEntry"):
@@ -509,6 +501,7 @@ def _run_pipeline_steps(
     pipeline_id:     str  = "",
     agent_overrides: dict | None = None,
     steps_override:  list | None = None,
+    output_dir:      str  = "",
 ):
     """Execute PIPELINE_STEPS (or steps_override) from start_step. Called in a background thread."""
     STEPS = steps_override if steps_override is not None else PIPELINE_STEPS
@@ -555,7 +548,7 @@ def _run_pipeline_steps(
             instruction = f"{override}\n\n---\n\n{instruction}"
         bb.update_status(agent_name, "in_progress", increment_iteration=True)
         try:
-            agent = AGENT_MAP[agent_name](repo_path, force_deepseek=force_ds, pipeline_id=pipeline_id)
+            agent = AGENT_MAP[agent_name](repo_path, force_deepseek=force_ds, pipeline_id=pipeline_id, output_dir=output_dir)
             agent.stop_event = _pipeline_stop_events.get(pipeline_id)
             result = agent.run(instruction, output_suffix=suffix)
             s = result["status"]
@@ -593,11 +586,26 @@ def _run_pipeline_steps(
         retry_req = bb.read(f"retry-request/{agent_name}.md") or ""
         if retry_req.startswith("["):
             retry_req = ""
+        if outputs:
+            file_checks = "\n".join(
+                f"  - call read_blackboard(filename=\"{f}\")" for f in outputs
+            )
+            file_section = (
+                f"Output files to verify (call read_blackboard for each — REWORK if missing or empty):\n"
+                f"{file_checks}"
+            )
+        else:
+            file_section = (
+                "No output files registered for this agent. "
+                "Call read_blackboard(filename=\"task.md\") and inspect the blackboard "
+                "for any files this agent was expected to produce."
+            )
         instr = (
             f"Evaluate the output just produced by the '{agent_name}' agent (attempt {attempt+1}).\n\n"
-            f"Output files to check: {', '.join(outputs) if outputs else '(none — check blackboard manually)'}\n"
-            f"Also read: task.md, and retry-request/{agent_name}.md if it exists.\n\n"
-            + (f"Previous rework feedback (now addressed or not):\n{retry_req}\n\n" if retry_req else "")
+            f"Step 1: call read_blackboard(filename=\"task.md\") to understand the task.\n"
+            f"Step 2: {file_section}\n"
+            + (f"Step 3: if retry-request/{agent_name}.md exists, call read_blackboard(filename=\"retry-request/{agent_name}.md\").\n\n" if retry_req else "\n")
+            + (f"Previous rework feedback:\n{retry_req}\n\n" if retry_req else "")
             + "Return PASS, REWORK {agent}: {critique}, or ESCALATE: {reason}."
         )
         try:
@@ -783,6 +791,8 @@ def get_pipeline_steps_for(pipeline_id: str):
         entry = _pipeline_registry.get(pipeline_id)
     if not entry:
         raise HTTPException(404, f"Pipeline '{pipeline_id}' not found")
+    if entry.steps_key == "custom":
+        return entry.custom_steps or []
     steps = _STEPS_MAP.get(entry.steps_key, PIPELINE_STEPS)
     return _serialise_steps(steps)
 
@@ -925,15 +935,18 @@ def pipeline_resume(req: PipelineResumeRequest):
 @app.post("/research/run")
 def research_run(req: ResearchRunRequest):
     """Run the research pipeline, optionally queuing a dev pipeline after."""
+    folder_name = _slugify(req.description)
+    output_dir  = str(STELLA_RESEARCH_DIR / folder_name)
+    if not req.repo_path:
+        req = req.model_copy(update={"repo_path": str(STELLA_RESEARCH_DIR / folder_name)})
     _ensure_repo(req.repo_path)
     pipeline_id = str(uuid.uuid4())[:8]
-    steps_key   = "research_analysis" if req.with_analysis else "research"
     entry = PipelineEntry(
         pipeline_id=pipeline_id,
         repo_path=req.repo_path,
         task_desc=req.description,
         status="running",
-        steps_key=steps_key,
+        steps_key="research_analysis",
     )
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
@@ -959,14 +972,18 @@ def research_run(req: ResearchRunRequest):
             _pipeline_registry[dev_pid] = dev_entry
             _pipeline_queues.setdefault(req.repo_path, []).append(dev_pid)
         _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
+    try:
+        _ensure_research_repo()
+    except Exception:
+        logger.warning("[research] could not ensure ~/stella-research repo", exc_info=True)
 
     def _run_research():
         stop_ev = threading.Event()
         _pipeline_stop_events[pipeline_id] = stop_ev
         try:
-            steps = RESEARCH_ANALYSIS_STEPS if req.with_analysis else RESEARCH_PIPELINE_STEPS
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
-                                steps_override=steps)
+                                steps_override=RESEARCH_ANALYSIS_STEPS,
+                                output_dir=output_dir)
             ctrl = _pipeline_control.get(pipeline_id, "running")
             final = "stopped" if ctrl == "stopped" else "done"
         except Exception:
@@ -977,18 +994,17 @@ def research_run(req: ResearchRunRequest):
         with _reg_lock:
             if pipeline_id in _pipeline_registry:
                 _pipeline_registry[pipeline_id].status = final
+        # Always write handoff so queued dev pipeline gets research context
+        # even if research failed partway through
+        try:
+            _write_handoff(entry)
+        except Exception:
+            logger.warning("[research] handoff write failed for %s", pipeline_id)
         if final == "done":
-            try:
-                _write_handoff(entry)
-            except Exception:
-                pass
-            if req.github_output:
-                try:
-                    pushed = _push_research_to_github(bb, req.github_output, req.description)
-                    _emit_pipeline_event("research_pushed", pipeline_id, req.repo_path,
-                                        f"{req.github_output.repo}/{req.github_output.folder} ({len(pushed)} files)")
-                except Exception:
-                    logger.exception("[research→github] push failed for %s", pipeline_id)
+            pushed = _push_stella_research(folder_name, req.description)
+            if pushed:
+                _emit_pipeline_event("research_pushed", pipeline_id, req.repo_path,
+                                     f"stellarie/stella-research/{folder_name}")
         _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, final)
         _start_next_queued(req.repo_path)
 
@@ -1065,6 +1081,185 @@ def scout_run(req: ScoutRunRequest):
     if dev_pid:
         result["dev_pipeline_id"] = dev_pid
     return result
+
+
+def _custom_to_pipeline_format(steps: list[CustomStep]) -> tuple[list, dict]:
+    """Convert custom pipeline steps to the internal PIPELINE_STEPS format + agent_overrides dict."""
+    pipeline_steps: list = []
+    agent_overrides: dict = {}
+    for step in steps:
+        for a in step.agents:
+            if a.preprompt.strip():
+                agent_overrides[a.name] = a.preprompt.strip()
+        if len(step.agents) == 1:
+            pipeline_steps.append(step.agents[0].name)
+        else:
+            pipeline_steps.append([{"agent": a.name, "count": 1, "reconcile": False} for a in step.agents])
+    return pipeline_steps, agent_overrides
+
+
+def _write_custom_handoff(entry: "PipelineEntry", handoff_files: list[str]):
+    """Write handoff.md reading only the specified blackboard files as context."""
+    bb = BlackBoard(entry.repo_path)
+    lines = [
+        f"# Custom pipeline handoff — {entry.pipeline_id}",
+        f"Task: {entry.task_desc[:200]}",
+        "",
+        "## Handoff context",
+    ]
+    for fname in handoff_files:
+        content = bb.read(fname)
+        if content and not content.startswith("["):
+            lines.append(f"\n### {fname}\n")
+            lines.append(content[:3000])
+            if len(content) > 3000:
+                lines.append(f"\n… (truncated, {len(content)} chars total)")
+    bb.write("handoff.md", "\n".join(lines))
+    logger.info("[custom] handoff.md written for %s (%d files)", entry.pipeline_id, len(handoff_files))
+
+
+@app.post("/custom/run")
+def custom_run(req: CustomPipelineRequest):
+    """Run a fully custom pipeline: arbitrary agents, ordered steps, per-agent preprompts."""
+    _require_repo(req.repo_path)
+    if not req.steps:
+        raise HTTPException(400, "steps must not be empty")
+
+    pipeline_steps, agent_overrides = _custom_to_pipeline_format(req.steps)
+    pipeline_id = str(uuid.uuid4())[:8]
+    entry = PipelineEntry(
+        pipeline_id=pipeline_id,
+        repo_path=req.repo_path,
+        task_desc=req.description,
+        status="running",
+        agent_overrides=agent_overrides,
+        steps_key="custom",
+        custom_steps=_serialise_steps(pipeline_steps),
+    )
+    with _reg_lock:
+        _pipeline_registry[pipeline_id] = entry
+
+    bb = BlackBoard(req.repo_path)
+    bb.init_task(pipeline_id, req.description)
+    bb.write("run-id",        pipeline_id)
+    bb.write("pipeline-step", "0")
+    _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
+
+    dev_pid = None
+    if req.queue_dev:
+        dev_pid = str(uuid.uuid4())[:8]
+        dev_desc = req.dev_description or req.description
+        dev_entry = PipelineEntry(
+            pipeline_id=dev_pid,
+            repo_path=req.repo_path,
+            task_desc=dev_desc,
+            status="queued",
+            source_pipeline_id=pipeline_id,
+        )
+        with _reg_lock:
+            _pipeline_registry[dev_pid] = dev_entry
+            _pipeline_queues.setdefault(req.repo_path, []).append(dev_pid)
+        _emit_pipeline_event("pipeline_queued", dev_pid, req.repo_path, dev_desc[:60])
+
+    def _run_custom():
+        stop_ev = threading.Event()
+        _pipeline_stop_events[pipeline_id] = stop_ev
+        try:
+            _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id,
+                                agent_overrides, steps_override=pipeline_steps)
+            ctrl = _pipeline_control.get(pipeline_id, "running")
+            final = "stopped" if ctrl == "stopped" else "done"
+        except Exception:
+            logger.exception("[custom] %s crashed", pipeline_id)
+            final = "failed"
+        finally:
+            _pipeline_stop_events.pop(pipeline_id, None)
+        with _reg_lock:
+            if pipeline_id in _pipeline_registry:
+                _pipeline_registry[pipeline_id].status = final
+        try:
+            if req.handoff_files:
+                _write_custom_handoff(entry, req.handoff_files)
+            else:
+                _write_handoff(entry)
+        except Exception:
+            logger.warning("[custom] handoff write failed for %s", pipeline_id)
+        _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, final)
+        _start_next_queued(req.repo_path)
+
+    threading.Thread(target=_run_custom, daemon=True, name=f"custom-{pipeline_id}").start()
+    result: dict = {"pipeline_id": pipeline_id, "status": "started"}
+    if dev_pid:
+        result["dev_pipeline_id"] = dev_pid
+    return result
+
+
+# ── Planning mode ─────────────────────────────────────────────────────────────
+
+class _PlanMsg(BaseModel):
+    role: str
+    content: str
+
+class PlanningChatRequest(BaseModel):
+    pipeline_type: str        = "dev"
+    initial_prompt: str       = ""
+    messages:       list[_PlanMsg] = []
+    finalize:       bool      = False
+
+_PLAN_SYSTEM = (
+    "You are a scoping consultant helping to narrow down a task before it's handed to an AI pipeline. "
+    "Your job: ask one or two targeted questions at a time to surface ambiguities — "
+    "tech stack, constraints, scope boundaries, expected output format, priorities. "
+    "Keep responses concise and direct. Guide the user toward a concrete, actionable task description. "
+    "Do not over-ask; if the task is already clear, say so and offer to finalize."
+)
+
+@app.post("/planning/chat")
+def planning_chat(req: PlanningChatRequest):
+    """Stateless planning chat via DeepSeek with max-effort reasoning."""
+    if not DEEPSEEK_API_KEY:
+        raise HTTPException(503, "DeepSeek API key not configured")
+
+    system = _PLAN_SYSTEM
+    if req.pipeline_type:
+        system += f"\n\nThe pipeline the user will run: {req.pipeline_type}."
+    if req.initial_prompt:
+        system += f"\n\nInitial prompt from the user: {req.initial_prompt}"
+    if req.finalize:
+        system += (
+            "\n\nThe user has confirmed they are satisfied. "
+            "Output ONLY the final refined task description — no intro sentence, no preamble, "
+            "just the task text itself, ready to be sent to the pipeline."
+        )
+
+    msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+
+    def generate():
+        try:
+            from openai import OpenAI as _OpenAI
+            client = _OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+            stream = client.chat.completions.create(
+                model="deepseek-v4-pro",
+                messages=[{"role": "system", "content": system}] + msgs,
+                max_tokens=108_000,
+                extra_body={"thinking": {"type": "enabled"}},
+                reasoning_effort="max",
+                stream=True,
+            )
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                text = chunk.choices[0].delta.content
+                if text:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/consultant/ask")

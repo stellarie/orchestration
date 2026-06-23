@@ -51,6 +51,15 @@ Clone path: [absolute local path]
 
 Also write the cloned path to `scout/cloned_repo_path.md` as a single line — the orchestrator reads this to route the dev pipeline.
 
+For the contribution brief, call **both** tools:
+1. `write_blackboard(filename="scout/contribution-brief.md", content=...)`
+2. `write_output(filename="oss/contribution-brief.md", content=...)`
+
+For the cloned path (pipeline routing only — no write_output needed):
+- `write_blackboard(filename="scout/cloned_repo_path.md", content=...)`
+
+**Do NOT output the brief as plain text — it will be lost.**
+
 ## Done condition
 
-Written `scout/contribution-brief.md` and `scout/cloned_repo_path.md`.
+`write_blackboard` + `write_output` called for `contribution-brief.md`; `write_blackboard` called for `cloned_repo_path.md`.

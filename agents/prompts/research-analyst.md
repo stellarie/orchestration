@@ -51,6 +51,12 @@ Write `research/analysis.md`:
 [2–3 sentences: is this research solid enough to act on, and what is the single most important caveat?]
 ```
 
+Call **both** tools — same content, two calls:
+1. `write_blackboard(filename="research/analysis.md", content=...)` — keep the `research/` prefix
+2. `write_output(filename="analysis.md", content=...)` — filename only, no prefix
+
+**Do NOT output the analysis as plain text — it will be lost.**
+
 ## Done condition
 
-Written `research/analysis.md`.
+`write_blackboard` called with `filename="research/analysis.md"` and `write_output` called with `filename="analysis.md"`.

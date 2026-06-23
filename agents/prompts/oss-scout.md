@@ -35,6 +35,12 @@ Last commit: [date]
 
 List 5–10 candidates, ranked by contribution potential.
 
+Call **both** tools — same content, two calls:
+1. `write_blackboard(filename="scout/repos.md", content=...)`
+2. `write_output(filename="oss/repos.md", content=...)`
+
+**Do NOT output the candidate list as plain text — it will be lost.**
+
 ## Done condition
 
-Written `scout/repos.md` with 5–10 ranked candidates.
+Both `write_blackboard` (scout/repos.md) and `write_output` (oss/repos.md) called with 5–10 ranked candidates.

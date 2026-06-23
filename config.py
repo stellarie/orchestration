@@ -127,38 +127,38 @@ AGENT_CONCURRENCY: dict[str, int] = {
 AGENT_CAPABILITIES: dict[str, dict] = {
     # ── read-only agents: explore codebase, write only to blackboard ─────────
     "architect": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "designer": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "planner": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "tester": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "reviewer": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "code-reviewer": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "documentation": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
 
     # ── scaffolder: writes contracts, CI, test env; runs compile check ───────
     "scaffolder": {
         "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard",
-                       "write_file", "run_command"},
+                       "write_file", "run_command", "write_memory"},
         "write_deny": [
             "src/test/java/**",    # no test source (only test/resources allowed)
             "src/test/kotlin/**",
@@ -171,7 +171,7 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     # ── test-generator: writes test files only; read_contract_file blocks impls ──
     "test-generator": {
         "tools":      {"list_files", "read_contract_file", "read_blackboard", "write_blackboard",
-                       "write_file"},
+                       "write_file", "write_memory"},
         "write_deny": [
             "src/main/**",         # no production source
             "src/main/java/**",
@@ -183,7 +183,7 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     # ── coder: writes production source; cannot touch test files ─────────────
     "coder": {
         "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard",
-                       "write_file", "run_command"},
+                       "write_file", "run_command", "write_memory"},
         "write_deny": [
             "src/test/**",
             "__tests__/**",
@@ -198,7 +198,7 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     # ── qa-tester: runs tests + attack commands; can add qa-test files ───────
     "qa-tester": {
         "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard",
-                       "write_file", "run_command"},
+                       "write_file", "run_command", "write_memory"},
         "write_deny": [
             "src/main/**",         # cannot modify production source
         ],
@@ -207,63 +207,67 @@ AGENT_CAPABILITIES: dict[str, dict] = {
     # ── commit: git commands only; no codebase writes ────────────────────────
     "commit": {
         "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard",
-                       "run_command"},
+                       "run_command", "write_memory"},
         "write_deny": [],          # write_file not in tools, so deny patterns are moot
     },
 
     # ── reconciler: reads parallel drafts, writes canonical blackboard files ──
     "reconciler": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "consultant": {
-        "tools":      {"list_files", "read_file", "read_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_memory"},
         "write_deny": [],
     },
     "judge": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
-    # ── research agents — web tools + blackboard write ────────────────────────
+    # ── research agents — web tools + blackboard + output write ──────────────
     "query-planner": {
-        "tools":      {"read_blackboard", "write_blackboard"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_memory"},
         "write_deny": [],
     },
     "searcher": {
-        "tools":      {"read_blackboard", "write_blackboard", "web_search"},
+        "tools":      {"read_blackboard", "write_blackboard", "web_search", "crawl_links", "write_memory"},
         "write_deny": [],
     },
     "reader": {
-        "tools":      {"read_blackboard", "write_blackboard", "fetch_url"},
+        "tools":      {"read_blackboard", "write_blackboard", "fetch_url", "crawl_links", "write_memory"},
         "write_deny": [],
     },
     "tech-auditor": {
-        "tools":      {"read_blackboard", "write_blackboard", "web_search", "fetch_url"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output",
+                       "web_search", "fetch_url", "crawl_links", "write_memory"},
         "write_deny": [],
     },
     "research-synthesizer": {
-        "tools":      {"read_blackboard", "write_blackboard"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output", "write_memory"},
         "write_deny": [],
     },
     "research-analyst": {
-        "tools":      {"read_blackboard", "write_blackboard"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output", "write_memory"},
         "write_deny": [],
     },
     "action-planner": {
-        "tools":      {"read_blackboard", "write_blackboard"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output", "write_memory"},
         "write_deny": [],
     },
     # ── OSS scout agents ──────────────────────────────────────────────────────
     "oss-scout": {
-        "tools":      {"read_blackboard", "write_blackboard", "web_search", "github_search"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output",
+                       "web_search", "github_search", "write_memory"},
         "write_deny": [],
     },
     "issue-auditor": {
-        "tools":      {"read_blackboard", "write_blackboard", "github_search", "fetch_url"},
+        "tools":      {"read_blackboard", "write_blackboard", "write_output",
+                       "github_search", "fetch_url", "crawl_links", "write_memory"},
         "write_deny": [],
     },
     "contribution-planner": {
-        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard", "run_command"},
+        "tools":      {"list_files", "read_file", "read_blackboard", "write_blackboard",
+                       "write_output", "run_command", "write_memory"},
         "write_deny": [],
     },
 }
@@ -284,4 +288,14 @@ AGENT_OUTPUTS: dict[str, list[str]] = {
     "commit":         ["commit.md"],
     "documentation":  ["docs.md", "pr-description.md"],
     "reconciler":     [],
+    # Research pipeline agents (blackboard paths — what the judge checks)
+    "query-planner":        ["research/queries.md"],
+    "tech-auditor":         ["research/versions.md", "research/caveats.md"],
+    "research-synthesizer": ["research/brief.md"],
+    "research-analyst":     ["research/analysis.md"],
+    "action-planner":       ["research/action-plan.md"],
+    # Scout pipeline agents (blackboard paths)
+    "oss-scout":            ["scout/repos.md"],
+    "issue-auditor":        ["scout/target-issue.md", "scout/runner-up.md"],
+    "contribution-planner": ["scout/contribution-brief.md", "scout/cloned_repo_path.md"],
 }

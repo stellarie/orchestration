@@ -526,6 +526,116 @@
     .compose-run:hover:not(:disabled) { background: rgba(56,139,253,.22); border-color: var(--blue); }
     .compose-run:disabled { opacity: .35; cursor: default; }
     .compose-run .mi { font-size: 14px; }
+
+    /* ── planning mode toggle ── */
+    .plan-toggle {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+      cursor: pointer; border: 1px solid; transition: background .15s, border-color .15s, color .15s;
+    }
+    .plan-toggle .mi { font-size: 15px; }
+    .plan-toggle--off { background: transparent; border-color: var(--border); color: var(--dim); }
+    .plan-toggle--off:hover { border-color: var(--purple); color: var(--purple); }
+    .plan-toggle--on  { background: rgba(188,140,255,.12); border-color: rgba(188,140,255,.35); color: var(--purple); }
+
+    /* ── planning modal ── */
+    .plan-modal {
+      width: 660px; max-width: calc(100vw - 32px);
+      max-height: 84vh; min-height: 400px;
+      display: flex; flex-direction: column; gap: 0;
+      padding: 0; overflow: hidden;
+    }
+    .plan-modal-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 18px 22px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .plan-modal-title { font-size: 15px; font-weight: 600; color: var(--text); flex: 1; }
+    .plan-type-badge {
+      font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: .5px;
+      background: rgba(188,140,255,.12); color: var(--purple); border: 1px solid rgba(188,140,255,.25);
+    }
+    .plan-prompt-box {
+      margin: 12px 22px 0; padding: 9px 12px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+      font-size: 11.5px; color: var(--dim); line-height: 1.55; flex-shrink: 0;
+      max-height: 80px; overflow-y: auto;
+    }
+    .plan-prompt-label { font-size: 9px; font-weight: 700; color: var(--dim); letter-spacing: .6px;
+                          text-transform: uppercase; margin-bottom: 4px; display: block; }
+    .plan-chat {
+      flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+      padding: 14px 22px; min-height: 0;
+    }
+    .plan-chat::-webkit-scrollbar { width: 4px; }
+    .plan-chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .plan-msg {
+      max-width: 88%; padding: 9px 13px; border-radius: 9px;
+      font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    }
+    .plan-msg--user {
+      align-self: flex-end;
+      background: rgba(56,139,253,.12); border: 1px solid rgba(56,139,253,.22); color: var(--text);
+    }
+    .plan-msg--assistant {
+      align-self: flex-start;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    }
+    .plan-thinking {
+      align-self: flex-start; color: var(--dim); font-size: 11.5px;
+      display: flex; align-items: center; gap: 6px; padding: 4px 0;
+    }
+    .plan-thinking .mi { font-size: 14px; animation: pulse 1.4s ease-in-out infinite; }
+    .plan-input-row {
+      display: flex; gap: 7px; padding: 10px 22px 16px;
+      border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    .plan-input {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 7px 11px; border-radius: 6px;
+      font-size: 13px; outline: none;
+    }
+    .plan-input:focus { border-color: var(--blue); }
+    .plan-input::placeholder { color: var(--dim); }
+    .plan-finalize-section { padding: 10px 22px 18px; display: flex; flex-direction: column; gap: 10px; }
+    .plan-finalize-label { font-size: 10px; font-weight: 700; color: var(--dim); letter-spacing: .5px; text-transform: uppercase; }
+    .plan-final-textarea {
+      width: 100%; min-height: 140px; background: var(--bg);
+      border: 1px solid rgba(63,185,80,.35); color: var(--text);
+      padding: 10px 13px; border-radius: 7px; font-size: 13px;
+      font-family: 'Segoe UI', sans-serif; resize: vertical; outline: none; line-height: 1.65;
+      box-sizing: border-box;
+    }
+    .plan-final-textarea:focus { border-color: var(--green); }
+    .plan-actions-row {
+      display: flex; gap: 8px; align-items: center;
+    }
+    .btn-plan-back {
+      padding: 6px 14px; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--dim); border-radius: 6px; font-size: 12px; cursor: pointer;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .btn-plan-back:hover { color: var(--text); }
+    .btn-plan-back .mi { font-size: 14px; }
+    .btn-plan-generate {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 16px; background: rgba(188,140,255,.12); border: 1px solid rgba(188,140,255,.35);
+      color: var(--purple); border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+      margin-left: auto;
+    }
+    .btn-plan-generate:hover { background: rgba(188,140,255,.22); }
+    .btn-plan-generate:disabled { opacity: .4; cursor: default; }
+    .btn-plan-generate .mi { font-size: 14px; }
+    .btn-plan-run {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 18px; background: var(--green); border: none;
+      color: #000; border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer;
+      margin-left: auto;
+    }
+    .btn-plan-run:hover { background: #4ecb6a; }
+    .btn-plan-run:disabled { opacity: .45; cursor: default; }
+    .btn-plan-run .mi { font-size: 14px; }
+    .plan-status { font-size: 11.5px; color: var(--red); min-height: 18px; padding: 0 22px 8px; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -555,9 +665,359 @@ const PIPELINE_AGENTS = [
 ];
 const PIPELINE_SET = new Set(PIPELINE_AGENTS);
 
+const ALL_AGENTS = [
+  ...PIPELINE_AGENTS,
+  "query-planner", "searcher", "reader", "tech-auditor",
+  "research-synthesizer", "research-analyst", "action-planner",
+  "oss-scout", "issue-auditor", "contribution-planner",
+];
+
+// ── PlanningModal ─────────────────────────────────────────────────────────────
+
+function PlanningModal({ pendingPipeline, onClose, onCreated }) {
+  const { mode, formData } = pendingPipeline;
+  const pipelineType = mode === 'research' ? 'research' : mode === 'scout' ? 'scout' : mode === 'custom' ? 'custom' : mode === 'queue' ? 'dev (queued)' : 'dev';
+  const initialPrompt = formData.desc;
+
+  const [messages,    setMessages]    = useState([]);
+  const [input,       setInput]       = useState('');
+  const [streaming,   setStreaming]   = useState(false);
+  const [streamText,  setStreamText]  = useState('');
+  const [phase,       setPhase]       = useState('chat'); // 'chat' | 'finalize'
+  const [finalPlan,   setFinalPlan]   = useState('');
+  const [submitting,  setSubmitting]  = useState(false);
+  const [status,      setStatus]      = useState('');
+  const chatEndRef = useRef(null);
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, streamText]);
+
+  const doStream = async (msgs, finalize = false) => {
+    setStreaming(true); setStreamText('');
+    let full = '';
+    try {
+      const resp = await fetch('/planning/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pipeline_type: pipelineType, initial_prompt: initialPrompt, messages: msgs, finalize }),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        for (const line of dec.decode(value).split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            if (ev.text)  { full += ev.text; setStreamText(full); }
+            if (ev.error) setStatus(`Error: ${ev.error}`);
+          } catch {}
+        }
+      }
+    } catch (e) { setStatus(`Error: ${e.message}`); }
+    finally { setStreaming(false); setStreamText(''); }
+    return full;
+  };
+
+  // Kick off: send initial prompt as user, get first response
+  useEffect(() => {
+    (async () => {
+      const initMsgs = [{ role: 'user', content: initialPrompt }];
+      const text = await doStream(initMsgs);
+      setMessages([{ role: 'user', content: initialPrompt }, { role: 'assistant', content: text }]);
+    })();
+  }, []);
+
+  const sendMessage = async () => {
+    if (!input.trim() || streaming) return;
+    const userMsg = input.trim(); setInput('');
+    const newMsgs = [...messages, { role: 'user', content: userMsg }];
+    setMessages(newMsgs);
+    const text = await doStream(newMsgs);
+    setMessages(m => [...m, { role: 'assistant', content: text }]);
+  };
+
+  const generatePlan = async () => {
+    const text = await doStream(messages, true);
+    setFinalPlan(text); setPhase('finalize');
+  };
+
+  const runPipeline = async () => {
+    if (!finalPlan.trim() || submitting) return;
+    setSubmitting(true); setStatus('');
+    try {
+      const desc = finalPlan.trim();
+      let endpoint, body;
+      if (mode === 'research') {
+        endpoint = '/research/run';
+        body = { repo_path: formData.repo, description: desc, queue_dev: formData.queueDev, dev_description: formData.devDesc || desc };
+      } else if (mode === 'scout') {
+        endpoint = '/scout/run';
+        body = { repo_path: formData.repo, description: desc, queue_dev: formData.queueDev, dev_description: formData.devDesc || desc };
+      } else if (mode === 'custom') {
+        endpoint = '/custom/run';
+        body = { repo_path: formData.repo, description: desc, steps: formData.steps, queue_dev: formData.queueDev, dev_description: formData.devDesc || desc, handoff_files: formData.handoffFiles };
+      } else if (mode === 'queue') {
+        endpoint = '/pipeline/queue';
+        body = { repo_path: formData.repo, description: desc, skip_agents: formData.skipped ?? [], agent_overrides: formData.overrides ?? {}, ...(formData.passOutputs && formData.sourcePipelineId ? { source_pipeline_id: formData.sourcePipelineId } : {}) };
+      } else {
+        endpoint = '/pipeline/run';
+        body = { repo_path: formData.repo, description: desc, skip_agents: formData.skipped ?? [] };
+      }
+      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail ?? 'Server error');
+      onCreated(d.pipeline_id, formData.repo, desc, mode === 'queue', new Set(formData.skipped ?? []), formData.overrides ?? {});
+    } catch (e) { setStatus(`Error: ${e.message}`); setSubmitting(false); }
+  };
+
+  const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+
+  return html`
+    <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+      <div class="modal plan-modal">
+
+        <div class="plan-modal-header">
+          <span class="mi" style="color:var(--purple);font-size:18px">psychology</span>
+          <div class="plan-modal-title">Planning Session</div>
+          <span class="plan-type-badge">${pipelineType}</span>
+          <button style="background:none;border:none;cursor:pointer;color:var(--dim);padding:2px 4px;border-radius:4px;display:flex;align-items:center" onClick=${onClose} title="Cancel">
+            <span class="mi">close</span>
+          </button>
+        </div>
+
+        <div class="plan-prompt-box">
+          <span class="plan-prompt-label">Initial prompt</span>
+          ${initialPrompt}
+        </div>
+
+        ${phase === 'chat' && html`
+          <div class="plan-chat">
+            ${messages.slice(1).map((m, i) => html`
+              <div key=${i} class=${`plan-msg plan-msg--${m.role}`}>${m.content}</div>
+            `)}
+            ${streaming && streamText && html`
+              <div class="plan-msg plan-msg--assistant">${streamText}<span style="opacity:.5">▋</span></div>
+            `}
+            ${streaming && !streamText && html`
+              <div class="plan-thinking">
+                <span class="mi">more_horiz</span> thinking…
+              </div>
+            `}
+            <div ref=${chatEndRef}></div>
+          </div>
+
+          ${status && html`<div class="plan-status">${status}</div>`}
+
+          <div class="plan-input-row">
+            <input class="plan-input" type="text" placeholder="Reply…"
+              value=${input} onInput=${e => setInput(e.target.value)} onKeyDown=${onKey}
+              disabled=${streaming} />
+            <button class="btn-primary" onClick=${sendMessage} disabled=${streaming || !input.trim()}>
+              <span class="mi mi-sm">send</span>
+            </button>
+            <button class="btn-plan-generate" onClick=${generatePlan} disabled=${streaming || messages.length < 2}
+              title="Generate the final refined task description">
+              <span class="mi">auto_fix_high</span> Generate Plan
+            </button>
+          </div>
+        `}
+
+        ${phase === 'finalize' && html`
+          <div class="plan-finalize-section">
+            <div class="plan-finalize-label">Refined task — edit if needed, then run</div>
+            <textarea class="plan-final-textarea"
+              value=${finalPlan} onInput=${e => setFinalPlan(e.target.value)}
+            ></textarea>
+          </div>
+
+          ${status && html`<div class="plan-status">${status}</div>`}
+
+          <div class="plan-input-row" style="border-top:1px solid var(--border)">
+            <button class="btn-plan-back" onClick=${() => setPhase('chat')}>
+              <span class="mi">arrow_back</span> Back to chat
+            </button>
+            <button class="btn-plan-run" onClick=${runPipeline} disabled=${submitting || !finalPlan.trim()} style="margin-left:auto">
+              <span class="mi">play_arrow</span>
+              ${submitting ? 'Starting…' : 'Run Pipeline'}
+            </button>
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+// ── CustomPipelineModal ───────────────────────────────────────────────────────
+
+function CustomPipelineModal({ defaultRepo, planningMode, onClose, onCreated, onNeedPlanning }) {
+  const nextId = useRef(100);
+  const uid    = () => ++nextId.current;
+
+  const [repo,         setRepo]         = useState(defaultRepo ?? '');
+  const [desc,         setDesc]         = useState('');
+  const [steps,        setSteps]        = useState([
+    { id: uid(), agents: [{ id: uid(), name: 'architect', preprompt: '' }] }
+  ]);
+  const [queueDev,     setQueueDev]     = useState(false);
+  const [devDesc,      setDevDesc]      = useState('');
+  const [handoffFiles, setHandoffFiles] = useState('');
+  const [busy,         setBusy]         = useState(false);
+  const [status,       setStatus]       = useState('');
+
+  const addStep    = () => setSteps(s => [...s, { id: uid(), agents: [{ id: uid(), name: 'coder', preprompt: '' }] }]);
+  const removeStep = sid => setSteps(s => s.filter(st => st.id !== sid));
+  const moveStep   = (sid, dir) => setSteps(s => {
+    const i = s.findIndex(st => st.id === sid), j = i + dir;
+    if (j < 0 || j >= s.length) return s;
+    const n = [...s]; [n[i], n[j]] = [n[j], n[i]]; return n;
+  });
+  const addAgent    = sid => setSteps(s => s.map(st =>
+    st.id === sid ? { ...st, agents: [...st.agents, { id: uid(), name: 'coder', preprompt: '' }] } : st
+  ));
+  const removeAgent = (sid, aid) => setSteps(s => s.map(st =>
+    st.id === sid ? { ...st, agents: st.agents.filter(a => a.id !== aid) } : st
+  ));
+  const updateAgent = (sid, aid, field, val) => setSteps(s => s.map(st =>
+    st.id === sid ? { ...st, agents: st.agents.map(a => a.id === aid ? { ...a, [field]: val } : a) } : st
+  ));
+
+  const canRun = repo.trim() && desc.trim() && steps.length > 0 && steps.every(s => s.agents.length > 0);
+
+  const submit = async () => {
+    if (!canRun) return;
+    const formData = {
+      mode: 'custom',
+      repo: repo.trim(), desc: desc.trim(),
+      steps: steps.map(st => ({ agents: st.agents.map(a => ({ name: a.name, preprompt: a.preprompt })) })),
+      queueDev, devDesc: devDesc.trim(),
+      handoffFiles: handoffFiles.split('\n').map(f => f.trim()).filter(Boolean),
+    };
+    if (planningMode) { onNeedPlanning(formData); return; }
+    setBusy(true); setStatus('');
+    try {
+      const r = await fetch(`${API}/custom/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_path: formData.repo, description: formData.desc, steps: formData.steps, queue_dev: formData.queueDev, dev_description: formData.devDesc, handoff_files: formData.handoffFiles }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail ?? 'Server error');
+      onCreated(d.pipeline_id, repo.trim(), desc.trim(), false, new Set(), {});
+    } catch (e) { setStatus(`Error: ${e.message}`); setBusy(false); }
+  };
+
+  const S = { border: '1px solid var(--border)', borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' };
+  const btnBase = 'background:none;border:none;cursor:pointer;padding:2px';
+
+  return html`
+    <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+      <div class="modal" style="max-height:90vh;overflow-y:auto;min-width:540px">
+        <div class="modal-title">Custom Pipeline</div>
+
+        <div class="modal-field">
+          <label>REPO PATH</label>
+          <input type="text" placeholder="e.g. C:/projects/myapp"
+            value=${repo} onInput=${e => setRepo(e.target.value)} />
+        </div>
+
+        <div class="modal-field">
+          <label>DESCRIPTION</label>
+          <textarea placeholder="What this pipeline should accomplish…"
+            value=${desc} onInput=${e => setDesc(e.target.value)}></textarea>
+        </div>
+
+        <label style="font-size:11px;font-weight:600;color:var(--dim);letter-spacing:.4px">STEPS</label>
+
+        ${steps.map((step, si) => html`
+          <div key=${step.id} style=${S}>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+              <span style="font-size:11px;font-weight:600;color:var(--dim)">STEP ${si + 1}</span>
+              ${step.agents.length > 1 && html`
+                <span style="font-size:10px;color:var(--purple);background:color-mix(in srgb,var(--purple) 12%,transparent);padding:1px 7px;border-radius:10px">
+                  parallel ×${step.agents.length}
+                </span>
+              `}
+              <span style="flex:1"></span>
+              <button style="${btnBase};color:var(--dim)" onClick=${() => moveStep(step.id, -1)} disabled=${si === 0} title="Move up">
+                <span class="mi" style="font-size:14px">arrow_upward</span>
+              </button>
+              <button style="${btnBase};color:var(--dim)" onClick=${() => moveStep(step.id, 1)} disabled=${si === steps.length - 1} title="Move down">
+                <span class="mi" style="font-size:14px">arrow_downward</span>
+              </button>
+              <button style="${btnBase};color:var(--red,#f44)" onClick=${() => removeStep(step.id)} disabled=${steps.length === 1} title="Remove step">
+                <span class="mi" style="font-size:14px">close</span>
+              </button>
+            </div>
+
+            ${step.agents.map((agent, ai) => html`
+              <div key=${agent.id} style="background:var(--hover);border-radius:4px;padding:8px;margin-bottom:6px">
+                <div style="display:flex;gap:6px;align-items:center">
+                  <select value=${agent.name}
+                    onChange=${e => updateAgent(step.id, agent.id, 'name', e.target.value)}
+                    style="flex:1;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:12px">
+                    ${ALL_AGENTS.map(n => html`<option key=${n} value=${n}>${n}</option>`)}
+                  </select>
+                  <button style="${btnBase};color:var(--red,#f44)"
+                    onClick=${() => removeAgent(step.id, agent.id)} disabled=${step.agents.length === 1} title="Remove agent">
+                    <span class="mi" style="font-size:14px">close</span>
+                  </button>
+                </div>
+                <textarea placeholder="Pre-prompt for this agent (optional)…"
+                  value=${agent.preprompt}
+                  onInput=${e => updateAgent(step.id, agent.id, 'preprompt', e.target.value)}
+                  style="margin-top:6px;width:100%;min-height:44px;box-sizing:border-box;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:11px;font-family:monospace;resize:vertical">
+                </textarea>
+              </div>
+            `)}
+
+            <button onClick=${() => addAgent(step.id)}
+              style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px">
+              <span class="mi mi-sm">add</span> Add agent to this step
+            </button>
+          </div>
+        `)}
+
+        <button onClick=${addStep}
+          style="width:100%;padding:8px;background:none;border:1px dashed var(--border);border-radius:6px;color:var(--dim);cursor:pointer;font-size:12px;margin-bottom:10px">
+          <span class="mi mi-sm">add</span> Add step
+        </button>
+
+        <div style="border-top:1px solid var(--border);padding-top:10px">
+          <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
+            <label style="margin:0;white-space:nowrap">QUEUE DEV PIPELINE AFTER</label>
+            <input type="checkbox" checked=${queueDev} onChange=${e => setQueueDev(e.target.checked)}
+              style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue)" />
+          </div>
+          ${queueDev && html`
+            <div class="modal-field" style="margin-top:8px">
+              <label>DEV TASK (optional, defaults to description)</label>
+              <textarea placeholder="What to build after this pipeline completes…"
+                value=${devDesc} onInput=${e => setDevDesc(e.target.value)}></textarea>
+            </div>
+            <div class="modal-field">
+              <label>HANDOFF FILES — blackboard paths passed as context to the dev pipeline (one per line)</label>
+              <textarea placeholder="e.g.\nresearch/brief.md\nanalysis.md\nrequirements.md"
+                value=${handoffFiles} onInput=${e => setHandoffFiles(e.target.value)}
+                style="font-family:monospace;font-size:11px;min-height:64px"></textarea>
+            </div>
+          `}
+        </div>
+
+        ${status && html`<div style="color:var(--red,#f44);font-size:12px;margin-top:4px">${status}</div>`}
+
+        <div class="modal-actions">
+          <button class="btn-cancel" onClick=${onClose} disabled=${busy}>Cancel</button>
+          <button class="btn-primary" onClick=${submit} disabled=${busy || !canRun}
+            style=${planningMode ? 'background:rgba(188,140,255,.8)' : ''}>
+            <span class="mi mi-sm">${planningMode ? 'psychology' : 'account_tree'}</span>
+            ${busy ? 'Starting…' : planningMode ? 'Plan & Run' : 'Run Pipeline'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ── PipelineModal (new run + queue) ─────────────────────────────────────────
 
-function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated }) {
+function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onClose, onCreated, onNeedPlanning }) {
   const isQueue    = mode === 'queue';
   const isResearch = mode === 'research';
   const isScout    = mode === 'scout';
@@ -568,11 +1028,6 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
   const [skipped,     setSkipped]     = useState(new Set());
   const [overrides,   setOverrides]   = useState({});
   const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
-  const [ghRepo,        setGhRepo]        = useState('stellarie/stella-research');
-  const [ghFolder,      setGhFolder]      = useState('');
-  const [ghBranch,      setGhBranch]      = useState('main');
-  const [pushGh,        setPushGh]        = useState(true);
-  const [withAnalysis,  setWithAnalysis]  = useState(false);
   const [status,      setStatus]      = useState('');
   const [busy,        setBusy]        = useState(false);
 
@@ -580,19 +1035,29 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
     const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n;
   });
 
+  const needsRepo = !isResearch || queueDev;
+
   const submit = async () => {
-    if (!repo.trim() || !desc.trim()) return;
+    if ((needsRepo && !repo.trim()) || !desc.trim()) return;
+    // Planning mode: hand off to planning modal instead of running immediately
+    if (planningMode) {
+      const formData = {
+        mode: isResearch ? 'research' : isScout ? 'scout' : isQueue ? 'queue' : 'new',
+        repo: repo.trim(), desc: desc.trim(),
+        devDesc: devDesc.trim(), queueDev,
+        skipped: [...skipped], overrides,
+        passOutputs, sourcePipelineId,
+      };
+      onNeedPlanning(formData); return;
+    }
     setBusy(true); setStatus('');
     try {
       let endpoint, body;
       if (isResearch) {
         endpoint = '/research/run';
-        const folder = ghFolder.trim() || desc.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
         body = {
           repo_path: repo.trim(), description: desc.trim(),
           queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim(),
-          with_analysis: withAnalysis,
-          ...(pushGh && ghRepo.trim() && { github_output: { repo: ghRepo.trim(), folder, branch: ghBranch.trim() || 'main' } }),
         };
       } else if (isScout) {
         endpoint = '/scout/run';
@@ -626,11 +1091,13 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
       <div class="modal" style="max-height:90vh;overflow-y:auto">
         <div class="modal-title">${isScout ? 'OSS Scout' : isResearch ? 'Research + Dev' : isQueue ? 'Queue Pipeline' : 'New Pipeline Run'}</div>
 
-        <div class="modal-field">
-          <label>REPO PATH</label>
-          <input type="text" placeholder="e.g. C:/projects/myapp"
-            value=${repo} onInput=${e => setRepo(e.target.value)} />
-        </div>
+        ${needsRepo && html`
+          <div class="modal-field">
+            <label>REPO PATH</label>
+            <input type="text" placeholder="e.g. C:/projects/myapp"
+              value=${repo} onInput=${e => setRepo(e.target.value)} />
+          </div>
+        `}
 
         <div class="modal-field">
           <label>${isScout ? 'SCOUT TOPIC' : isResearch ? 'RESEARCH TOPIC' : 'TASK DESCRIPTION'}</label>
@@ -652,46 +1119,6 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
                 value=${devDesc} onInput=${e => setDevDesc(e.target.value)}></textarea>
             </div>
           `}
-        `}
-
-        ${isResearch && html`
-          <div style="border-top:1px solid var(--border);margin:8px 0;padding-top:10px">
-            <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">
-              <label style="margin:0;white-space:nowrap">DEEP ANALYSIS + ACTION PLAN</label>
-              <input type="checkbox" checked=${withAnalysis}
-                onChange=${e => setWithAnalysis(e.target.checked)}
-                style="width:16px;height:16px;cursor:pointer;accent-color:var(--orange,#f0883e)" />
-            </div>
-            ${withAnalysis && html`
-              <div style="font-size:11px;color:var(--dim);padding:2px 0 6px">
-                Adds <strong>research-analyst</strong> (confidence map, gaps, risks) and <strong>action-planner</strong> (prioritised action list) after synthesis.
-              </div>
-            `}
-            <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px;margin-top:6px">
-              <label style="margin:0;white-space:nowrap">PUSH TO GITHUB</label>
-              <input type="checkbox" checked=${pushGh}
-                onChange=${e => setPushGh(e.target.checked)}
-                style="width:16px;height:16px;cursor:pointer;accent-color:var(--green)" />
-            </div>
-            ${pushGh && html`
-              <div class="modal-field">
-                <label>REPO</label>
-                <input type="text" placeholder="owner/repo"
-                  value=${ghRepo} onInput=${e => setGhRepo(e.target.value)} />
-              </div>
-              <div class="modal-field" style="flex-direction:row;gap:8px">
-                <div style="flex:1">
-                  <label>FOLDER (auto-generated from topic if blank)</label>
-                  <input type="text" placeholder="e.g. fastapi-v0.115"
-                    value=${ghFolder} onInput=${e => setGhFolder(e.target.value)} />
-                </div>
-                <div style="width:90px">
-                  <label>BRANCH</label>
-                  <input type="text" value=${ghBranch} onInput=${e => setGhBranch(e.target.value)} />
-                </div>
-              </div>
-            `}
-          </div>
         `}
 
         ${(!isResearch && !isScout) && html`
@@ -737,9 +1164,10 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, onClose, onCreated
 
         <div class="modal-actions">
           <button class="btn-cancel" onClick=${onClose} disabled=${busy}>Cancel</button>
-          <button class="btn-primary" onClick=${submit} disabled=${busy || !repo.trim() || !desc.trim()}>
-            <span class="mi mi-sm">${isQueue ? 'queue' : 'play_arrow'}</span>
-            ${busy ? 'Starting…' : isQueue ? 'Queue Pipeline' : 'Run Pipeline'}
+          <button class="btn-primary" onClick=${submit} disabled=${busy || (needsRepo && !repo.trim()) || !desc.trim()}
+            style=${planningMode ? 'background:rgba(188,140,255,.8)' : ''}>
+            <span class="mi mi-sm">${planningMode ? 'psychology' : isQueue ? 'queue' : 'play_arrow'}</span>
+            ${busy ? 'Starting…' : planningMode ? 'Plan & Run' : isQueue ? 'Queue Pipeline' : 'Run Pipeline'}
           </button>
         </div>
       </div>
@@ -1112,7 +1540,7 @@ function OutputDrawer({ repoPath, selectedAgent, files, onClose }) {
 
 // ── TabBar ────────────────────────────────────────────────────────────────────
 
-function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout, onClose }) {
+function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout, onCustom, onClose }) {
   return html`
     <div class="tab-bar">
       <button class=${`tab-btn${activeTab === 'overview' ? ' active' : ''}`} onClick=${() => onSelect('overview')}>
@@ -1140,6 +1568,10 @@ function TabBar({ pipelines, activeTab, onSelect, onNew, onResearch, onScout, on
       <button class="tab-btn tab-btn--add" onClick=${onScout} title="OSS Scout pipeline"
         style="color:var(--green,#4caf50);gap:3px">
         <span class="mi mi-sm">search</span>
+      </button>
+      <button class="tab-btn tab-btn--add" onClick=${onCustom} title="Custom pipeline"
+        style="color:var(--yellow,#ffc107);gap:3px">
+        <span class="mi mi-sm">account_tree</span>
       </button>
     </div>
   `;
@@ -1368,6 +1800,18 @@ function App() {
   const [consultantState, setConsultantState] = useState({ status: 'idle', currentTool: null });
   const [consultantEvents, setConsultantEvents] = useState([]);
   const [showModal,      setShowModal]      = useState(null); // null | {mode, defaultRepo}
+  const [planningMode,   setPlanningMode]   = useState(() => localStorage.getItem('planningMode') === 'true');
+  const [pendingPipeline, setPendingPipeline] = useState(null); // formData waiting for planning
+
+  const togglePlanningMode = () => setPlanningMode(prev => {
+    const n = !prev; localStorage.setItem('planningMode', n); return n;
+  });
+
+  const handleNeedPlanning = (formData) => {
+    setShowModal(null);
+    // Wrap so PlanningModal can destructure { mode, formData }
+    setPendingPipeline({ mode: formData.mode, formData });
+  };
 
   const esRef              = useRef(null);
   const entryId            = useRef(0);
@@ -1558,13 +2002,31 @@ function App() {
 
   return html`
     <div class="root">
-      ${showModal && html`
+      ${pendingPipeline && html`
+        <${PlanningModal}
+          pendingPipeline=${pendingPipeline}
+          onClose=${() => setPendingPipeline(null)}
+          onCreated=${(pid, repo, desc, isQ, skipped, overrides) => { setPendingPipeline(null); handlePipelineCreated(pid, repo, desc, isQ, skipped, overrides); }}
+        />
+      `}
+      ${showModal && showModal.mode === 'custom' && html`
+        <${CustomPipelineModal}
+          defaultRepo=${showModal.defaultRepo ?? defaultRepo}
+          planningMode=${planningMode}
+          onClose=${() => setShowModal(null)}
+          onCreated=${handlePipelineCreated}
+          onNeedPlanning=${handleNeedPlanning}
+        />
+      `}
+      ${showModal && showModal.mode !== 'custom' && html`
         <${PipelineModal}
           mode=${showModal.mode}
           defaultRepo=${showModal.defaultRepo ?? defaultRepo}
           sourcePipelineId=${showModal.sourcePipelineId ?? ''}
+          planningMode=${planningMode}
           onClose=${() => setShowModal(null)}
           onCreated=${handlePipelineCreated}
+          onNeedPlanning=${handleNeedPlanning}
         />
       `}
 
@@ -1572,6 +2034,13 @@ function App() {
         <div class="header-title">
           <span class="mi">account_tree</span> Orchestration
         </div>
+        <div class="header-sep"></div>
+        <button class=${`plan-toggle plan-toggle--${planningMode ? 'on' : 'off'}`}
+          onClick=${togglePlanningMode}
+          title=${planningMode ? 'Planning mode ON — agent will scope your task before running' : 'Planning mode OFF — click to enable'}>
+          <span class="mi">psychology</span>
+          Planning
+        </button>
         <div class="header-sep"></div>
         <div class=${`conn-dot ${connected ? 'on' : 'off'}`} title=${connected ? 'Connected' : 'Disconnected'}></div>
       </div>
@@ -1583,6 +2052,7 @@ function App() {
         onNew=${() => setShowModal({mode: 'new', defaultRepo})}
         onResearch=${() => setShowModal({mode: 'research', defaultRepo})}
         onScout=${() => setShowModal({mode: 'scout', defaultRepo})}
+        onCustom=${() => setShowModal({mode: 'custom', defaultRepo})}
         onClose=${handleCloseTab}
       />
 
