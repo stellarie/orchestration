@@ -253,6 +253,24 @@ def _normalise_verdict(raw: str) -> str:
     return text
 
 
+def _copy_research_outputs(repo_path: str, output_dir: str) -> None:
+    """Copy everything from <repo_path>/.blackboard/research/ into output_dir/.
+
+    Agents that have write_output already wrote their files there; this catches
+    the agents that only write to the blackboard (query-planner, searcher, reader).
+    """
+    import shutil
+    src = Path(repo_path) / ".blackboard" / "research"
+    dst = Path(output_dir)
+    if not src.exists():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in src.iterdir():
+        if f.is_file():
+            shutil.copy2(f, dst / f.name)
+    logger.info("[research] copied %s → %s", src, dst)
+
+
 def _git_configure_identity(repo: str) -> None:
     """Apply GIT_USER_NAME / GIT_USER_EMAIL to the repo's local git config."""
     import subprocess
@@ -1058,6 +1076,10 @@ def research_run(req: ResearchRunRequest):
             final = "failed"
         finally:
             _pipeline_stop_events.pop(pipeline_id, None)
+        try:
+            _copy_research_outputs(req.repo_path, output_dir)
+        except Exception:
+            logger.warning("[research] output copy failed", exc_info=True)
         with _reg_lock:
             if pipeline_id in _pipeline_registry:
                 _pipeline_registry[pipeline_id].status = final
