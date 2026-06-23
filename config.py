@@ -8,6 +8,9 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+GIT_USER_NAME  = os.getenv("GIT_USER_NAME", "")
+GIT_USER_EMAIL = os.getenv("GIT_USER_EMAIL", "")
+
 # provider       — "deepseek" or "anthropic"
 # thinking       — enable extended reasoning for this agent
 # reasoning_effort — DeepSeek only: "high" | "max"

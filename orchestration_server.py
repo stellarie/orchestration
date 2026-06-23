@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from logging_config import setup_logging
 from blackboard import BlackBoard
-from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, AGENT_OUTPUTS
+from config import AGENT_CONCURRENCY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, AGENT_OUTPUTS, GIT_USER_NAME, GIT_USER_EMAIL
 from event_bus import bus, interrupt_bus
 from validators import validate_agent_output
 
@@ -232,28 +232,64 @@ def _slugify(text: str) -> str:
     return slug or "research"
 
 
+def _normalise_verdict(raw: str) -> str:
+    """Extract the first PASS / REWORK / ESCALATE line from judge output.
+
+    The judge occasionally wraps its verdict in markdown fences or adds a
+    preamble sentence before the keyword. Strip fences, then return the first
+    line that starts with one of the three keywords (case-insensitive).
+    Falls back to the stripped raw string so callers never get an empty value.
+    """
+    text = raw.strip()
+    # Strip surrounding code fences
+    if text.startswith("```"):
+        inner = [l for l in text.splitlines() if not l.startswith("```")]
+        text = "\n".join(inner).strip()
+    for line in text.splitlines():
+        line = line.strip()
+        upper = line.upper()
+        if upper.startswith("PASS") or upper.startswith("REWORK") or upper.startswith("ESCALATE"):
+            return line
+    return text
+
+
+def _git_configure_identity(repo: str) -> None:
+    """Apply GIT_USER_NAME / GIT_USER_EMAIL to the repo's local git config."""
+    import subprocess
+    if GIT_USER_NAME:
+        subprocess.run(["git", "config", "user.name", GIT_USER_NAME],
+                       cwd=repo, capture_output=True, timeout=10)
+    if GIT_USER_EMAIL:
+        subprocess.run(["git", "config", "user.email", GIT_USER_EMAIL],
+                       cwd=repo, capture_output=True, timeout=10)
+
+
 def _ensure_research_repo() -> None:
     """Ensure ~/stella-research exists and is a git repo. Clones from GitHub if GITHUB_TOKEN is set."""
     import subprocess
     STELLA_RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
+    repo = str(STELLA_RESEARCH_DIR)
     if (STELLA_RESEARCH_DIR / ".git").exists():
+        _git_configure_identity(repo)
         return
     token = os.getenv("GITHUB_TOKEN")
     if token:
         url = f"https://{token}@github.com/stellarie/stella-research.git"
-        r = subprocess.run(["git", "clone", url, "."], cwd=str(STELLA_RESEARCH_DIR),
+        r = subprocess.run(["git", "clone", url, "."], cwd=repo,
                            capture_output=True, text=True, timeout=120)
         if r.returncode == 0:
             logger.info("[research→git] cloned stellarie/stella-research to %s", STELLA_RESEARCH_DIR)
+            _git_configure_identity(repo)
             return
         logger.warning("[research→git] clone failed: %s — initialising empty repo", r.stderr.strip())
-    subprocess.run(["git", "init"], cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10)
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True, timeout=10)
+    _git_configure_identity(repo)
     subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
-                   cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10)
+                   cwd=repo, capture_output=True, timeout=10)
     if token:
         subprocess.run(
             ["git", "remote", "add", "origin", f"https://{token}@github.com/stellarie/stella-research.git"],
-            cwd=str(STELLA_RESEARCH_DIR), capture_output=True, timeout=10,
+            cwd=repo, capture_output=True, timeout=10,
         )
 
 
@@ -263,6 +299,7 @@ def _push_stella_research(folder_name: str, topic: str) -> bool:
     token = os.getenv("GITHUB_TOKEN")
     repo  = str(STELLA_RESEARCH_DIR)
     try:
+        _git_configure_identity(repo)
         subprocess.run(["git", "add", "."], cwd=repo, check=True, timeout=30)
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"],
                               cwd=repo, capture_output=True, timeout=10)
@@ -655,7 +692,7 @@ def _run_pipeline_steps(
             if status in ("failed", "stopped", "skipped"):
                 return status
 
-            verdict = _run_judge(agent_name, attempt)
+            verdict = _normalise_verdict(_run_judge(agent_name, attempt))
 
             if verdict.upper().startswith("PASS"):
                 return "done"

@@ -77,6 +77,8 @@ Research and scout pipelines can auto-queue a dev pipeline on completion. The re
 - `ANTHROPIC_API_KEY` — optional; enables Claude Opus/Sonnet for architect, planner, judge, and all research agents. Falls back to DeepSeek v4 Pro if unset (or auto-inherited when running inside Claude Code)
 - `TAVILY_API_KEY` — optional; enables higher-quality web search for research/scout agents. Falls back to DuckDuckGo (via `ddgs`, no key needed) if unset
 - `GITHUB_TOKEN` — optional; required to push research deliverables to `stellarie/stella-research`. Needs `contents: write` on that repo. Token is also used to clone the repo on first run if `~/stella-research` doesn't exist yet.
+- `GIT_USER_NAME` — optional; name used for git commits in `~/stella-research` (e.g. `Stella`). Required for push to work if no global git identity is configured.
+- `GIT_USER_EMAIL` — optional; email used for git commits in `~/stella-research`. Required alongside `GIT_USER_NAME`.
 
 ### Install
 
@@ -96,6 +98,8 @@ DEEPSEEK_API_KEY=your-key-here
 ANTHROPIC_API_KEY=your-key-here   # optional but recommended
 TAVILY_API_KEY=your-key-here      # optional
 GITHUB_TOKEN=your-token-here      # optional — push research to stellarie/stella-research
+GIT_USER_NAME=Your Name           # optional — git commit identity for stella-research pushes
+GIT_USER_EMAIL=you@example.com    # optional — git commit identity for stella-research pushes
 ```
 
 ### Start

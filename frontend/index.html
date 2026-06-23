@@ -765,6 +765,7 @@ function PlanningModal({ pendingPipeline, onClose, onCreated }) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail ?? 'Server error');
       onCreated(d.pipeline_id, formData.repo, desc, mode === 'queue', new Set(formData.skipped ?? []), formData.overrides ?? {});
+      if (d.dev_pipeline_id) onCreated(d.dev_pipeline_id, formData.repo, formData.devDesc || desc, true, new Set(), {});
     } catch (e) { setStatus(`Error: ${e.message}`); setSubmitting(false); }
   };
 
@@ -900,6 +901,7 @@ function CustomPipelineModal({ defaultRepo, planningMode, onClose, onCreated, on
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail ?? 'Server error');
       onCreated(d.pipeline_id, repo.trim(), desc.trim(), false, new Set(), {});
+      if (d.dev_pipeline_id) onCreated(d.dev_pipeline_id, formData.repo || repo.trim(), formData.devDesc || desc.trim(), true, new Set(), {});
     } catch (e) { setStatus(`Error: ${e.message}`); setBusy(false); }
   };
 
@@ -1081,6 +1083,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onCl
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail ?? 'Server error');
       onCreated(d.pipeline_id, repo.trim(), desc.trim(), isQueue, new Set(skipped), overrides);
+      if (d.dev_pipeline_id) onCreated(d.dev_pipeline_id, repo.trim(), d.dev_description || desc.trim(), true, new Set(), {});
     } catch (e) { setStatus(`Error: ${e.message}`); setBusy(false); }
   };
 
