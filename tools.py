@@ -463,18 +463,11 @@ class ToolExecutor:
         except Exception as e:
             errors.append(f"duckduckgo: {e}")
 
-        # 3. Bing (scraping fallback)
-        try:
-            r = self._web_search_bing(query, max_results)
-            if r:
-                return r
-        except Exception as e:
-            errors.append(f"bing: {e}")
-
         err = "; ".join(errors) if errors else "no backend available"
         return (
-            f"[web_search] All backends failed ({err}). "
-            "Install ddgs for free search: pip install ddgs"
+            f"[web_search] No search backend available ({err}). "
+            "Use your training knowledge to identify relevant URLs for this query, "
+            "then call crawl_links with those URLs to retrieve up-to-date content directly."
         )
 
     def _web_search_tavily(self, query: str, max_results: int, api_key: str) -> str:
@@ -494,48 +487,6 @@ class ToolExecutor:
         lines = [f"Query: {query} (via Tavily)\n"]
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r.get('title', '')}\n   URL: {r.get('url', '')}\n   {r.get('content', '')[:400]}\n")
-        return "\n".join(lines)
-
-    def _web_search_bing(self, query: str, max_results: int = 8) -> str:
-        import urllib.request, urllib.parse, json as _json
-        params = urllib.parse.urlencode({"q": query, "count": min(max_results * 2, 20)})
-        url = f"https://www.bing.com/search?{params}"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) "
-                "Gecko/20100101 Firefox/124.0"
-            ),
-            "Accept":          "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "DNT":             "1",
-        })
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-
-        # Each organic result lives in <li class="b_algo">
-        algo_blocks = re.findall(
-            r'<li[^>]+class="[^"]*\bb_algo\b[^"]*"[^>]*>(.*?)</li>',
-            html, re.DOTALL,
-        )
-        results = []
-        for block in algo_blocks[:max_results]:
-            m = re.search(
-                r'<h2[^>]*>.*?<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>',
-                block, re.DOTALL,
-            )
-            if not m:
-                continue
-            link  = m.group(1)
-            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-            sp    = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
-            snip  = re.sub(r"<[^>]+>", " ", sp.group(1)).strip()[:400] if sp else ""
-            results.append((title, link, snip))
-
-        if not results:
-            return ""
-        lines = [f"Query: {query} (via Bing)\n"]
-        for i, (title, link, snip) in enumerate(results, 1):
-            lines.append(f"{i}. {title}\n   URL: {link}\n   {snip}\n")
         return "\n".join(lines)
 
     def _fetch_url(self, url: str, timeout: int = 20) -> str:
