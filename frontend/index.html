@@ -1029,9 +1029,10 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onCl
   const [queueDev,    setQueueDev]    = useState(true);
   const [skipped,     setSkipped]     = useState(new Set());
   const [overrides,   setOverrides]   = useState({});
-  const [passOutputs, setPassOutputs] = useState(!!sourcePipelineId);
-  const [status,      setStatus]      = useState('');
-  const [busy,        setBusy]        = useState(false);
+  const [passOutputs,   setPassOutputs]   = useState(!!sourcePipelineId);
+  const [researchMode,  setResearchMode]  = useState('technical');
+  const [status,        setStatus]        = useState('');
+  const [busy,          setBusy]          = useState(false);
 
   const toggleSkip = (name) => setSkipped(prev => {
     const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n;
@@ -1060,6 +1061,7 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onCl
         body = {
           repo_path: repo.trim(), description: desc.trim(),
           queue_dev: queueDev, dev_description: devDesc.trim() || desc.trim(),
+          research_mode: researchMode,
         };
       } else if (isScout) {
         endpoint = '/scout/run';
@@ -1104,9 +1106,26 @@ function PipelineModal({ mode, defaultRepo, sourcePipelineId, planningMode, onCl
 
         <div class="modal-field">
           <label>${isScout ? 'SCOUT TOPIC' : isResearch ? 'RESEARCH TOPIC' : 'TASK DESCRIPTION'}</label>
-          <textarea placeholder=${isScout ? 'Interests, language, domain — e.g. "Python web frameworks, good first issue"' : isResearch ? 'What to research — tech stack, libraries, version requirements…' : 'Describe what you want to build or change…'}
+          <textarea placeholder=${isScout ? 'Interests, language, domain — e.g. "Python web frameworks, good first issue"' : isResearch && researchMode==='general' ? 'What to research — e.g. "list of top open-source vector databases" or "comprehensive review of React state management in 2025"…' : isResearch ? 'What to research — tech stack, libraries, version requirements…' : 'Describe what you want to build or change…'}
             value=${desc} onInput=${e => setDesc(e.target.value)} onKeyDown=${onKey}></textarea>
         </div>
+
+        ${isResearch && html`
+          <div class="modal-field" style="flex-direction:row;align-items:center;gap:8px">
+            <label style="margin:0;white-space:nowrap">MODE</label>
+            ${['technical','general'].map(m => html`
+              <button key=${m} onClick=${() => setResearchMode(m)}
+                style="padding:3px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-size:11px;
+                       background:${researchMode===m ? 'var(--blue)' : 'none'};
+                       color:${researchMode===m ? '#fff' : 'var(--fg)'};text-transform:uppercase">
+                ${m}
+              </button>
+            `)}
+            <span style="font-size:11px;color:var(--muted);margin-left:4px">
+              ${researchMode==='general' ? 'crawl · synthesise · analyse — no tech audit or action plan' : 'crawl · tech audit · synthesise · analyse · action plan'}
+            </span>
+          </div>
+        `}
 
         ${(isResearch || isScout) && html`
           <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px">

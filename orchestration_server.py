@@ -162,6 +162,7 @@ class ResearchRunRequest(BaseModel):
     description:     str
     queue_dev:       bool = False
     dev_description: str  = ""
+    research_mode:   str  = "technical"  # "technical" | "general"
 
 
 class ScoutRunRequest(BaseModel):
@@ -489,10 +490,21 @@ OSS_SCOUT_STEPS = [
     "contribution-planner",
 ]
 
-RESEARCH_PIPELINE_STEPS = [
+_RESEARCH_CORE_STEPS = [
     "query-planner",
     {"agent": "searcher",  "count": 3, "reconcile": False},
     {"agent": "reader",    "count": 3, "reconcile": False},
+]
+
+# General mode — crawl, synthesise, analyse. No tech audit or action plan.
+# Good for "list of X", "comprehensive review of Y", non-technical topics.
+RESEARCH_GENERAL_STEPS = _RESEARCH_CORE_STEPS + [
+    "research-synthesizer",
+    "research-analyst",
+]
+
+# Technical mode — adds tech-auditor (versions/caveats) and action-planner.
+RESEARCH_PIPELINE_STEPS = _RESEARCH_CORE_STEPS + [
     "tech-auditor",
     "research-synthesizer",
 ]
@@ -857,6 +869,7 @@ _STEPS_MAP = {
     "dev":               PIPELINE_STEPS,
     "research":          RESEARCH_PIPELINE_STEPS,
     "research_analysis": RESEARCH_ANALYSIS_STEPS,
+    "research_general":  RESEARCH_GENERAL_STEPS,
     "scout":             OSS_SCOUT_STEPS,
 }
 
@@ -1034,9 +1047,10 @@ def research_run(req: ResearchRunRequest):
     with _reg_lock:
         _pipeline_registry[pipeline_id] = entry
 
-    _research_label = "research+dev" if req.queue_dev else "research"
+    _active_steps   = RESEARCH_GENERAL_STEPS if req.research_mode == "general" else RESEARCH_ANALYSIS_STEPS
+    _research_label = "research+dev" if req.queue_dev else req.research_mode
     bb = BlackBoard(req.repo_path)
-    bb.init_task(pipeline_id, req.description, _agents_in_steps(RESEARCH_ANALYSIS_STEPS))
+    bb.init_task(pipeline_id, req.description, _agents_in_steps(_active_steps))
     bb.write("run-id",        pipeline_id)
     bb.write("pipeline-step", "0")
     _emit_pipeline_event("pipeline_status", pipeline_id, req.repo_path, "running")
@@ -1066,7 +1080,7 @@ def research_run(req: ResearchRunRequest):
         _pipeline_stop_events[pipeline_id] = stop_ev
         try:
             _run_pipeline_steps(req.repo_path, req.description, 0, set(), pipeline_id, {},
-                                steps_override=RESEARCH_ANALYSIS_STEPS,
+                                steps_override=_active_steps,
                                 output_dir=output_dir,
                                 pipeline_label=_research_label)
             ctrl = _pipeline_control.get(pipeline_id, "running")
